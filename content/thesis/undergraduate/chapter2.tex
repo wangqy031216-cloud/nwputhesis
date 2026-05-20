@@ -1,68 +1,393 @@
 %% 第二章
 
-\chapter{图表示例}
-\chaptermark{图表示例}
+\chapter{大模型对齐基础理论与相关技术}
+\chaptermark{大模型对齐基础理论与相关技术}
 
-\section{表格}
-如\autoref{tab:undergraduate-example} 所示，该表展示了两个变量的加法与乘法结果，可作为表格排版与引用的示例。
-\begin{table}[!h]
+本章系统梳理大语言模型对齐所涉及的核心理论基础与关键技术，为后续章节奠定基础。内容涵盖马尔可夫决策过程与强化学习基础、逆强化学习原理、基于人类反馈的强化学习与奖励模型训练、直接偏好优化，以及各对齐方法的综合对比。
+
+\section{强化学习基础}
+
+大模型对齐本质上是一个序贯决策问题，强化学习为其提供了核心数学工具。
+
+\subsection{马尔可夫决策过程}
+
+强化学习（Reinforcement Learning, RL）是研究智能体如何通过与环境交互来学习最优决策策略的机器学习范式\cite{sutton1999policy}。其标准数学框架为马尔可夫决策过程（Markov Decision Process, MDP），由五元组 $\mathcal{M} = (\mathcal{S}, \mathcal{A}, \mathcal{P}, \mathcal{R}, \gamma)$ 定义：$\mathcal{S}$ 为状态空间，$\mathcal{A}$ 为动作空间，$\mathcal{P}: \mathcal{S} \times \mathcal{A} \times \mathcal{S} \to [0,1]$ 为状态转移概率核，满足 $\sum_{s' \in \mathcal{S}} \mathcal{P}(s'|s,a) = 1$ 对所有 $(s,a)$ 成立；$\mathcal{R}: \mathcal{S} \times \mathcal{A} \to \mathbb{R}$ 为奖励函数；$\gamma \in [0,1)$ 为折扣因子，权衡即时奖励与未来奖励的相对重要性。MDP的核心假设是马尔可夫性质：下一状态 $s_{t+1}$ 的条件分布仅取决于当前状态 $s_t$ 与动作 $a_t$，与历史状态序列无关，即 $\mathcal{P}(s_{t+1}|s_t,a_t,\ldots,s_0,a_0) = \mathcal{P}(s_{t+1}|s_t,a_t)$。
+
+智能体与环境的交互过程如下。在时刻 $t$，智能体观察当前状态 $s_t \in \mathcal{S}$，依据策略 $\pi: \mathcal{S} \to \Delta(\mathcal{A})$（$\Delta(\mathcal{A})$ 为 $\mathcal{A}$ 上的概率单纯形）选择动作 $a_t \sim \pi(\cdot|s_t)$；环境随后依据转移核转移至下一状态 $s_{t+1} \sim \mathcal{P}(\cdot|s_t,a_t)$，并返回即时奖励 $r_t = \mathcal{R}(s_t, a_t)$。强化学习的目标是寻找最优策略 $\pi^*$，使从初始状态出发的期望累积折扣奖励最大：
+\begin{equation}
+    J(\pi) = \mathbb{E}_{\tau \sim \pi}\left[\sum_{t=0}^{\infty} \gamma^t r_t\right] = \mathbb{E}_{\tau \sim \pi}\left[\sum_{t=0}^{\infty} \gamma^t \mathcal{R}(s_t, a_t)\right]
+    \label{eq:rl_objective}
+\end{equation}
+其中 $\tau = (s_0, a_0, s_1, a_1, \ldots)$ 为策略 $\pi$ 诱导的轨迹，初始状态 $s_0 \sim \rho_0$ 服从初始状态分布。
+
+MDP框架在大语言模型对齐中被自然地适配为如下形式：状态 $s_t$ 对应输入提示 $x$ 与已生成的部分响应 $(y_1, y_2, \ldots, y_{t-1})$ 的拼接；动作 $a_t = y_t$ 为模型在当前位置生成的下一词元（token）；状态转移为确定性的，将新词元追加到已生成序列即得下一状态；终止状态对应结束标记（EOS token）出现后的位置。语言模型的词汇表通常包含数万乃至十余万个词元，动作空间极大，且生成序列的时序较长（典型回复可达数百至数千步），表格式方法完全不可行，必须依赖函数逼近与样本估计。为简化计算，采用序列级标量奖励 $r(x, y)$：在完整响应 $y$ 生成后，奖励模型对其进行统一评分，中间步骤奖励为零\cite{ouyang2022training}。
+
+
+\subsection{价值函数与Bellman方程}
+
+价值函数是强化学习理论的核心工具，将策略的长期性能浓缩为状态或状态-动作对上的单一标量，从而使策略评估与改进得以高效进行。给定策略 $\pi$，状态价值函数 $V^\pi: \mathcal{S} \to \mathbb{R}$ 与动作价值函数（Q函数）$Q^\pi: \mathcal{S} \times \mathcal{A} \to \mathbb{R}$ 分别定义为：
+\begin{equation}
+    V^\pi(s) = \mathbb{E}_{\tau \sim \pi}\left[\sum_{t=0}^{\infty} \gamma^t r_t \,\bigg|\, s_0 = s\right], \quad
+    Q^\pi(s, a) = \mathbb{E}_{\tau \sim \pi}\left[\sum_{t=0}^{\infty} \gamma^t r_t \,\bigg|\, s_0 = s, a_0 = a\right]
+    \label{eq:value_functions}
+\end{equation}
+两者的关系为 $V^\pi(s) = \mathbb{E}_{a \sim \pi(\cdot|s)}[Q^\pi(s,a)] = \sum_{a} \pi(a|s) Q^\pi(s,a)$，以及 $Q^\pi(s,a) = \mathcal{R}(s,a) + \gamma \mathbb{E}_{s' \sim \mathcal{P}(\cdot|s,a)}[V^\pi(s')]$。
+
+Bellman期望方程（Bellman Expectation Equation）刻画了价值函数所满足的递归结构。对于策略 $\pi$，$V^\pi$ 与 $Q^\pi$ 分别满足：
+\begin{align}
+    V^\pi(s) &= \sum_{a} \pi(a|s) \left[\mathcal{R}(s,a) + \gamma \sum_{s'} \mathcal{P}(s'|s,a) V^\pi(s')\right]
+    \label{eq:bellman_v} \\
+    Q^\pi(s,a) &= \mathcal{R}(s,a) + \gamma \sum_{s'} \mathcal{P}(s'|s,a) \sum_{a'} \pi(a'|s') Q^\pi(s',a')
+    \label{eq:bellman_q}
+\end{align}
+式~\eqref{eq:bellman_v}与式~\eqref{eq:bellman_q}分别构成关于 $V^\pi$ 和 $Q^\pi$ 的线性方程组，在有限状态空间中可直接求解（策略评估），亦可作为时序差分学习（Temporal Difference Learning）的更新目标。借助算子理论，可定义Bellman期望算子 $\mathcal{T}^\pi$，在无穷范数下以 $\gamma$ 为收缩系数，且 $V^\pi$ 是 $\mathcal{T}^\pi$ 的唯一不动点——这从理论上保证了策略评估的收敛性。
+
+Bellman最优方程（Bellman Optimality Equation）则刻画了最优价值函数 $V^* = \max_\pi V^\pi$ 与 $Q^* = \max_\pi Q^\pi$ 所满足的非线性递归结构：
+\begin{align}
+    V^*(s) &= \max_{a} \left[\mathcal{R}(s,a) + \gamma \sum_{s'} \mathcal{P}(s'|s,a) V^*(s')\right]
+    \label{eq:bellman_opt_v} \\
+    Q^*(s,a) &= \mathcal{R}(s,a) + \gamma \sum_{s'} \mathcal{P}(s'|s,a) \max_{a'} Q^*(s',a')
+    \label{eq:bellman_opt_q}
+\end{align}
+最优价值函数 $V^*$ 是最优Bellman算子 $\mathcal{T}^*$ 的唯一不动点，$\mathcal{T}^*$ 同样以 $\gamma$ 为收缩系数。经典Q-learning算法\cite{sutton1999policy}以式~\eqref{eq:bellman_opt_q}为更新目标，通过随机梯度下降逼近 $Q^*$，进而间接获得最优策略 $\pi^*(s) = \arg\max_a Q^*(s,a)$。
+
+优势函数（Advantage Function）$A^\pi(s, a)$ 定义为动作价值函数与状态价值函数之差：
+\begin{equation}
+    A^\pi(s, a) = Q^\pi(s, a) - V^\pi(s)
+    \label{eq:advantage}
+\end{equation}
+$A^\pi(s,a)$ 度量了在状态 $s$ 下选择动作 $a$ 相对于策略均值行为的收益增量：$A^\pi(s,a) > 0$ 意味着动作 $a$ 优于均值水平，$A^\pi(s,a) < 0$ 则意味着该动作低于均值水平。优势函数在策略梯度估计中发挥着关键作用：以 $A^\pi$ 代替 $Q^\pi$ 作为梯度权重，可在不改变梯度期望的前提下显著降低估计方差，这正是广义优势估计（Generalized Advantage Estimation, GAE）的核心思想，将在下一小节详细阐述。
+
+\subsection{策略梯度方法}
+
+策略梯度方法直接对策略参数进行优化，适用于大规模连续动作空间或高维离散动作空间（如语言模型的词元空间）。策略梯度定理\cite{sutton1999policy}给出了目标函数 $J(\pi_\phi) = \mathbb{E}_{s_0 \sim \rho_0}[V^{\pi_\phi}(s_0)]$ 关于参数 $\phi$ 的精确梯度表达式：
+\begin{equation}
+    \nabla_\phi J(\pi_\phi) = \mathbb{E}_{s \sim d^{\pi_\phi}, a \sim \pi_\phi(\cdot|s)}\left[\nabla_\phi \log \pi_\phi(a|s) \cdot Q^{\pi_\phi}(s, a)\right]
+    \label{eq:policy_gradient}
+\end{equation}
+其中 $d^{\pi_\phi}(s) = (1-\gamma)\sum_{t=0}^\infty \gamma^t \Pr(s_t=s|\pi_\phi)$ 为策略 $\pi_\phi$ 诱导的折扣状态占用度量。式~\eqref{eq:policy_gradient}的关键意义在于，策略梯度被表示为对当前策略 $\pi_\phi$ 的期望，可通过蒙特卡洛采样进行无偏估计，无需已知环境动力学 $\mathcal{P}$。
+
+最基本的策略梯度算法REINFORCE通过蒙特卡洛方法估计式~\eqref{eq:policy_gradient}：以实际累积折扣奖励 $G_t = \sum_{k=t}^T \gamma^{k-t} r_k$ 作为 $Q^{\pi_\phi}(s_t, a_t)$ 的估计，提供无偏但高方差的梯度估计；引入不依赖动作的基线函数 $b(s_t)$（通常取 $V^{\pi_\phi}(s_t)$ 的估计）可在不破坏无偏性的前提下显著降低方差。
+
+演员-评论员（Actor-Critic）框架同时维护策略网络（演员，Actor）与价值网络（评论员，Critic）：Actor以Critic提供的优势函数估计 $\hat{A}(s_t, a_t) = r_t + \gamma V_\psi(s_{t+1}) - V_\psi(s_t)$ 作为策略梯度权重；Critic通过最小化TD误差在线更新，相比纯REINFORCE显著降低了方差。
+
+广义优势估计（Generalized Advantage Estimation, GAE）\cite{schulman2017proximal}提供了一种可在偏差与方差之间灵活权衡的优势函数估计方案。定义TD残差 $\delta_t = r_t + \gamma V_\psi(s_{t+1}) - V_\psi(s_t)$，GAE优势估计为TD残差的指数加权和：
+\begin{equation}
+    \hat{A}_t^{\text{GAE}(\gamma,\lambda)} = \sum_{l=0}^{\infty} (\gamma\lambda)^l \delta_{t+l}
+    \label{eq:gae}
+\end{equation}
+其中 $\lambda \in [0,1]$ 为控制偏差-方差权衡的超参数：$\lambda = 0$ 时退化为单步TD残差 $\hat{A}_t^{\text{GAE}} = \delta_t$，高偏差低方差；$\lambda = 1$ 时退化为蒙特卡洛优势估计 $\hat{A}_t^{\text{GAE}} = \sum_l \gamma^l \delta_{t+l} = G_t - V_\psi(s_t)$，低偏差高方差。在工程实现中，$\lambda$ 通常取 $[0.9, 0.99]$，在偏差与方差之间取得合理折中。GAE构成现代策略梯度方法的标准组件，在RLHF框架下的PPO实现中应用广泛\cite{zheng2023secrets}。
+
+\subsection{近端策略优化}
+
+近端策略优化（Proximal Policy Optimization, PPO）\cite{schulman2017proximal}是目前应用最广泛的策略梯度算法，也是大语言模型RLHF后训练阶段的主流优化方法\cite{ouyang2022training}。PPO在重要性采样框架下实施离策略更新，并借助截断机制约束每次更新的幅度，在提高样本效率的同时保证训练稳定性。
+
+PPO的基础是替代目标函数（Surrogate Objective）。设 $\pi_{\phi_{\text{old}}}$ 为采样时所用的旧策略，$\pi_\phi$ 为当前待优化策略，重要性采样比率定义为：
+\begin{equation}
+    \rho_t(\phi) = \frac{\pi_\phi(a_t|s_t)}{\pi_{\phi_{\text{old}}}(a_t|s_t)}
+    \label{eq:importance_ratio}
+\end{equation}
+无截断替代目标 $\mathcal{L}^{\text{CPI}}(\phi) = \mathbb{E}_t[\rho_t(\phi) \hat{A}_t]$ 在 $\pi_\phi = \pi_{\phi_{\text{old}}}$ 时等价于策略梯度目标，但对大幅更新不加限制。PPO-Clip通过对比率截断解决这一问题：
+\begin{equation}
+    \mathcal{L}^{\text{CLIP}}(\phi) = \mathbb{E}_t\left[\min\left(\rho_t(\phi) \hat{A}_t,\ \text{clip}(\rho_t(\phi), 1-\epsilon, 1+\epsilon) \hat{A}_t\right)\right]
+    \label{eq:ppo_clip}
+\end{equation}
+其中超参数 $\epsilon \in (0.1, 0.3)$ 控制截断区间宽度：当 $\hat{A}_t > 0$ 时截断上界 $1+\epsilon$ 阻止过度强化，当 $\hat{A}_t < 0$ 时截断下界 $1-\epsilon$ 防止过度惩罚，取二者最小值使目标函数对策略变化保持保守。PPO的完整目标还在截断目标基础上叠加价值函数均方误差损失与策略熵正则：$\mathcal{L}^{\text{PPO}} = \mathcal{L}^{\text{CLIP}} - c_1 \mathcal{L}^{\text{VF}} + c_2 \mathcal{H}(\pi_\phi)$，在语言模型RLHF实现中熵奖励有时被KL散度惩罚代替\cite{zheng2023secrets}。此外，PPO-KL变体以自适应KL惩罚取代截断，根据实际与目标KL散度的比较动态调节惩罚系数，在需要精确控制策略偏移的场景中更为便利。
+
+在大语言模型RLHF的实际实现中，PPO训练面临若干工程挑战\cite{zheng2023secrets}：其一，价值网络须与策略网络同步维护，占用大量GPU显存；其二，需等完整响应生成后才能计算奖励，导致样本效率偏低；其三，多项超参数（学习率、截断系数 $\epsilon$、GAE参数 $\lambda$、KL系数、批次大小等）的联合调节较为复杂，对最终对齐效果有显著影响。正是这些工程复杂性，促使后续简化方法（如DPO）受到广泛关注。
+
+\subsection{KL散度约束的策略优化}
+
+单纯最大化奖励模型分数往往导致策略过度优化（over-optimization）：模型生成奖励模型评分极高但实际质量极差的退化响应，并丧失预训练所积累的语言能力。标准做法是在优化目标中引入对参考策略 $\pi_{\text{ref}}$（通常为SFT后的模型）的KL散度惩罚项，形成带约束的强化学习目标\cite{ouyang2022training}：
+\begin{equation}
+    \max_{\pi}\, \mathbb{E}_{x \sim \mathcal{D},\, y \sim \pi(\cdot|x)}\left[r(x, y)\right] - \beta \cdot D_{\text{KL}}\left(\pi(\cdot|x) \,\|\, \pi_{\text{ref}}(\cdot|x)\right)
+    \label{eq:kl_constrained}
+\end{equation}
+其中 $\beta > 0$ 为KL惩罚系数，$D_{\text{KL}}(\pi \| \pi_{\text{ref}}) = \mathbb{E}_{y \sim \pi}[\log \pi(y|x) - \log \pi_{\text{ref}}(y|x)]$。调节 $\beta$ 可权衡奖励最大化与对参考策略特性的保持：$\beta$ 越大，策略越保守，越靠近 $\pi_{\text{ref}}$；$\beta$ 越小，策略越激进，越趋向纯奖励最大化。
+
+式~\eqref{eq:kl_constrained}存在可解析求解的闭式最优解，这是其重要理论性质。将其改写为如下等价形式：
+\begin{align}
+    \max_{\pi}\, \mathbb{E}_{x \sim \mathcal{D}}\left[\mathbb{E}_{y \sim \pi(\cdot|x)}\left[r(x, y) - \beta \log \frac{\pi(y|x)}{\pi_{\text{ref}}(y|x)}\right]\right]
+    \label{eq:kl_constrained_v2}
+\end{align}
+对固定的 $x$，内层关于 $\pi(\cdot|x)$ 的优化是带归一化约束 $\sum_y \pi(y|x) = 1$ 的凹函数最大化问题，由KKT条件可得最优解满足：
+\begin{equation}
+    \pi^*(y|x) \propto \pi_{\text{ref}}(y|x) \exp\left(\frac{r(x, y)}{\beta}\right)
+    \label{eq:boltzmann_unnorm}
+\end{equation}
+经归一化后的最优策略为：
+\begin{equation}
+    \pi^*(y|x) = \frac{\pi_{\text{ref}}(y|x) \exp\left(r(x, y)/\beta\right)}{Z(x)}
+    \label{eq:boltzmann}
+\end{equation}
+其中归一化配分函数 $Z(x) = \sum_y \pi_{\text{ref}}(y|x) \exp(r(x,y)/\beta)$ 保证了 $\pi^*(\cdot|x)$ 的概率归一性。该Boltzmann分布与统计物理存在内在类比：将 $-r(x,y)/\beta$ 视为能量、$\beta$ 视为逆温度，则最优策略恰好对应该能量函数的Gibbs分布。
+
+以下给出式~\eqref{eq:boltzmann}的完整推导。对于固定的 $x$，设Lagrange函数为：
+\begin{equation}
+    \mathcal{L}(\pi, \lambda) = \sum_y \pi(y|x)\left[r(x,y) - \beta \log \frac{\pi(y|x)}{\pi_{\text{ref}}(y|x)}\right] - \lambda\left(\sum_y \pi(y|x) - 1\right)
+\end{equation}
+对 $\pi(y|x)$ 求偏导并令其为零：
+\begin{equation}
+    \frac{\partial \mathcal{L}}{\partial \pi(y|x)} = r(x,y) - \beta \log \frac{\pi(y|x)}{\pi_{\text{ref}}(y|x)} - \beta - \lambda = 0
+\end{equation}
+由此解出 $\pi(y|x) = \pi_{\text{ref}}(y|x) \exp\left(\frac{r(x,y) - \beta - \lambda}{\beta}\right)$，代入归一化条件 $\sum_y \pi(y|x) = 1$ 确定 $\lambda$，化简即得式~\eqref{eq:boltzmann}。由于目标函数关于 $\pi(\cdot|x)$ 严格凹（负熵项严格凸），该解为唯一全局最优解。
+
+对式~\eqref{eq:boltzmann}两边取对数并整理，得到奖励函数与最优策略之间的关键等价关系：
+\begin{equation}
+    r(x, y) = \beta \log \frac{\pi^*(y|x)}{\pi_{\text{ref}}(y|x)} + \beta \log Z(x)
+    \label{eq:reward_reparam}
+\end{equation}
+式~\eqref{eq:reward_reparam}揭示了一个关键等价：在KL约束RL目标下，奖励函数与最优策略之间存在一一对应，且附加项 $\beta \log Z(x)$ 仅依赖于提示 $x$ 而与响应 $y$ 无关。这一性质是DPO推导的数学基础，将在\ref{sec:dpo}节详细阐述。
+
+\section{逆强化学习}
+
+有别于正向强化学习的已知奖励假设，逆强化学习旨在从行为中反推奖励函数。
+
+\subsection{问题形式化与研究动机}
+
+逆强化学习（Inverse Reinforcement Learning, IRL）\cite{ng2000algorithms}是强化学习的逆向问题。正向RL在已知奖励函数的MDP中寻找最优策略；IRL则从专家（expert）在未知奖励函数下表现出的最优或近优行为轨迹中，反向推断潜在奖励函数 $r^*$，再以该奖励函数驱动正向RL进行策略学习。IRL的核心假设是：专家行为在某一潜在奖励函数下（近似）最优，因此观测到的专家轨迹中隐含了关于任务目标的丰富信息。
+
+Ng和Russell在奠基性工作\cite{ng2000algorithms}中系统研究了IRL问题的形式化与可行性。给定MDP $\mathcal{M} \setminus \mathcal{R}$（即除奖励函数外的所有要素）和专家策略 $\pi_E$（或专家轨迹集合 $\mathcal{D}_E = \{\tau_E^{(i)}\}$），IRL的目标是恢复奖励函数 $r^*$，使 $\pi_E$ 在该奖励下为最优。然而，IRL存在固有的不适定性（ill-posedness）：满足 $\pi_E$ 为最优的奖励函数通常有无穷多个（例如，零奖励函数使任意策略均为最优）。为缩小解空间，早期方法借助特征匹配（feature matching）准则：假设奖励函数为状态特征 $\phi(s)$ 的线性组合 $r(s) = \theta^\top \phi(s)$，则专家策略的特征期望 $\mu_E = \mathbb{E}_{\pi_E}\left[\sum_t \gamma^t \phi(s_t)\right]$ 与学习策略的特征期望 $\mu_\theta$ 之差即为IRL的优化目标。学徒学习（Apprenticeship Learning）框架将奖励函数的不确定性转化为对特征期望的约束，在该框架下所学策略在所有满足特征匹配约束的奖励函数下均近优\cite{ng2000algorithms}。
+
+IRL与模仿学习（Imitation Learning, IL）密切相关，但二者存在本质区别\cite{li2024imitation}。行为克隆（Behavior Cloning, BC）直接从专家示例中学习状态-动作映射 $\pi_E: s \mapsto a$，将其归结为监督学习问题，但面临复合误差（compounding error）困境：在训练分布之外，微小的预测误差可能不断累积并引发分布偏移。相比之下，IRL通过显式建模奖励函数，使所学策略具备更强的泛化能力，并能处理状态分布偏移的场景。在大语言模型对齐中，IRL的核心优势在于：所学奖励模型 $r_\theta$ 可随当前策略分布的变化而动态更新，从而缓解固定奖励模型面临的分布偏移问题，这正是本文研究工作的核心出发点之一。
+
+IRL还可从最优控制与概率推断的视角加以理解。在控制即推断（Control as Inference）框架下\cite{ziebart2008maximum}，轨迹的最优性被视为潜变量，IRL等价于在给定专家轨迹观测时对奖励函数进行后验推断。这一概率视角不仅为最大熵IRL奠定了理论基础，也揭示了IRL与变分推断、能量模型等概率图模型领域之间的内在联系。
+
+\subsection{最大熵逆强化学习}
+
+最大熵逆强化学习（Maximum Entropy IRL, MaxEnt IRL）由Ziebart等人\cite{ziebart2008maximum}提出，从信息论视角解决了IRL问题的不适定性。在特征匹配约束 $\mu_\theta = \mu_E$ 下，满足约束的分布通常有无穷多个；最大熵原理（Maximum Entropy Principle）从中选取熵最大者，即在保持特征期望匹配的前提下不对其他信息作额外假设，从而唯一确定一个分布。
+
+MaxEnt IRL在轨迹空间上定义的最大熵分布具有Gibbs形式。设奖励函数线性参数化为 $r_\theta(\tau) = \theta^\top \mathbf{f}(\tau)$（$\mathbf{f}(\tau)$ 为轨迹特征向量），最大熵原理给出：
+\begin{equation}
+    P_\theta(\tau) = \frac{1}{Z(\theta)} \exp\left(r_\theta(\tau)\right) = \frac{1}{Z(\theta)} \exp\left(\sum_t r_\theta(s_t, a_t)\right)
+    \label{eq:maxent_distribution}
+\end{equation}
+其中 $Z(\theta) = \sum_{\tau} \exp(r_\theta(\tau))$ 为对所有可能轨迹求和（或积分）的归一化配分函数。MaxEnt IRL的目标是最大化专家轨迹数据集 $\mathcal{D}_E = \{\tau_E^{(i)}\}_{i=1}^N$ 在分布 $P_\theta$ 下的对数似然：
+\begin{equation}
+    \max_\theta\, \mathcal{L}_{\text{MaxEnt}}(\theta) = \frac{1}{N}\sum_{i=1}^N \log P_\theta(\tau_E^{(i)}) = \frac{1}{N}\sum_{i=1}^N r_\theta(\tau_E^{(i)}) - \log Z(\theta)
+    \label{eq:maxent_objective}
+\end{equation}
+
+对式~\eqref{eq:maxent_objective}关于 $\theta$ 求偏导：
+\begin{equation}
+    \nabla_\theta \mathcal{L}_{\text{MaxEnt}} = \mathbb{E}_{\tau \sim \mathcal{D}_E}\left[\mathbf{f}(\tau)\right] - \mathbb{E}_{\tau \sim P_\theta}\left[\mathbf{f}(\tau)\right] = \mu_E - \mu_\theta
+    \label{eq:maxent_gradient}
+\end{equation}
+梯度等于专家特征期望与当前模型特征期望之差，这正是特征匹配条件的直接驱动力——梯度上升推动 $\mu_\theta \to \mu_E$，即所学奖励函数使当前最优策略的特征期望收敛至专家示例的特征期望。
+
+计算 $\mu_\theta = \mathbb{E}_{\tau \sim P_\theta}[\mathbf{f}(\tau)]$ 需对所有轨迹求期望，在大规模状态动作空间中计算代价极高。Ziebart等人提出利用动态规划（值迭代）高效计算状态访问频率\cite{ziebart2008maximum}：通过前向后向（forward-backward）算法求得每个状态-动作对 $(s,a)$ 在 $P_\theta$ 下的期望访问次数，进而得到特征期望 $\mu_\theta$。MaxEnt IRL的完整算法交替执行以下两步：（1）以当前奖励参数 $\theta$ 通过值迭代计算最优策略 $\pi^*_\theta$ 及状态访问频率 $\mu_\theta$；（2）沿梯度方向 $\mu_E - \mu_\theta$ 更新 $\theta$。
+
+MaxEnt IRL与能量模型（Energy-Based Model, EBM）之间存在深刻联系\cite{wulfmeier2024irl}。将 $-r_\theta(\tau)$ 视为轨迹的能量，式~\eqref{eq:maxent_distribution}恰为以轨迹为随机变量的能量模型。训练能量模型的标准方法对比散度（Contrastive Divergence）与式~\eqref{eq:maxent_gradient}的梯度结构完全一致：增大数据样本（专家轨迹）的概率，同时减小模型生成样本（当前策略轨迹）的概率。配分函数 $Z(\theta)$ 在连续空间中通常不可解析计算，这是MaxEnt IRL的主要计算挑战，也推动了后续基于MCMC的采样方法和对比方法（如GAIL）的发展。
+
+在语言模型对齐的序列级奖励设定下，MaxEnt IRL目标简化为如下形式：
+\begin{align}
+    \mathcal{L}_{\text{IRL}}(\theta) &= \mathbb{E}_{(x,y) \sim \mathcal{D}_E}\left[r_\theta(x, y)\right] - \log Z(\theta) \notag \\
+    \nabla_\theta \mathcal{L}_{\text{IRL}} &= \mathbb{E}_{(x,y_E) \sim \mathcal{D}_E}\left[\nabla_\theta r_\theta(x, y_E)\right] - \mathbb{E}_{x \sim \mathcal{D}, y \sim \pi^*_\theta(\cdot|x)}\left[\nabla_\theta r_\theta(x, y)\right]
+    \label{eq:maxent_seq}
+\end{align}
+即最大化专家响应的奖励评分，同时最小化当前策略采样响应的奖励评分。这一对比形式构成了本文第三章方法设计的理论基础。
+
+\subsection{生成对抗模仿学习}
+
+生成对抗模仿学习（Generative Adversarial Imitation Learning, GAIL）将IRL与生成对抗网络（GAN）结合：奖励函数类比为判别器 $D_\theta$，策略类比为生成器，通过 $\min_{\pi_\phi} \max_{D_\theta}$ 对抗训练交替更新，绕开了MaxEnt IRL中配分函数的显式计算。从信息论角度，GAIL最小化当前策略与专家占用度量之间的Jensen-Shannon散度；判别器无需手工特征设计，由深度网络端到端学习，为本文的奖励学习设计提供了对抗框架参考。
+
+\subsection{奖励—策略双层优化框架}
+
+将IRL框架应用于语言模型对齐，自然形成奖励函数与策略之间的双层优化（Bilevel Optimization）问题\cite{wulfmeier2024irl}。外层（outer level）以奖励参数 $\theta$ 为优化变量，最小化逆强化学习目标；内层（inner level）以策略参数 $\phi$ 为优化变量，在当前奖励函数下求解KL约束的最优策略：
+\begin{align}
+    &\min_\theta\quad \mathcal{L}_{\text{outer}}(\theta) = J(\pi_E, r_\theta) - J(\pi^*_\theta, r_\theta) \label{eq:bilevel_outer} \\
+    &\text{s.t.}\quad \pi^*_\theta = \arg\max_\pi\, J(\pi, r_\theta) - \beta \cdot D_{\text{KL}}(\pi \| \pi_{\text{ref}}) \label{eq:bilevel_inner}
+\end{align}
+其中 $J(\pi, r) = \mathbb{E}_{x \sim \mathcal{D}, y \sim \pi(\cdot|x)}[r(x,y)]$ 为策略 $\pi$ 在奖励 $r$ 下的期望奖励。
+
+外层目标要求奖励函数能够区分专家行为（高评分）与当前策略行为（低评分），即最小化专家策略与当前策略在奖励函数下的期望奖励之差。内层目标由式~\eqref{eq:kl_constrained}给出，其闭式最优解为Boltzmann分布 $\pi^*_\theta(y|x) \propto \pi_{\text{ref}}(y|x)\exp(r_\theta(x,y)/\beta)$。
+
+将内层闭式解代入外层目标，可分析双层优化的收敛行为。当奖励函数 $r_\theta$ 与内层策略 $\pi^*_\theta$ 均达到不动点时，系统满足以下均衡条件：
+\begin{equation}
+    \mathbb{E}_{y \sim \pi_E(\cdot|x)}\left[\nabla_\theta r_\theta(x,y)\right] = \mathbb{E}_{y \sim \pi^*_\theta(\cdot|x)}\left[\nabla_\theta r_\theta(x,y)\right], \quad \forall x
+    \label{eq:equilibrium}
+\end{equation}
+均衡时专家响应与当前策略响应的奖励梯度期望相等，奖励函数无法进一步区分二者，策略已收敛至接近专家的行为分布。该均衡条件在形式上与GAN的均衡条件（生成分布等于数据分布）高度一致。
+
+实际训练中，精确求解内层问题（需对所有提示 $x$ 和响应 $y$ 进行精确计算）不可行，通常采用两种近似策略：（1）交替优化（Alternating Optimization）——每次外层奖励更新后，执行若干步内层策略梯度上升（PPO步骤）以近似内层最优，两者交替迭代；（2）单循环近似（Single-Loop Approximation）——将奖励更新与策略更新步骤交织于同一迭代循环，每步分别对 $\theta$ 和 $\phi$ 各进行一次梯度更新。前者理论保证更强，但工程复杂度较高；后者实现简便，但收敛分析相对困难。
+
+上述联合迭代机制对奖励函数更新的幅度提出了严格要求：若每轮迭代中奖励函数变化过大，内层策略尚未收敛至新奖励对应的最优策略，外层便已启动新一轮奖励更新，将导致奖励模型出现数值尺度膨胀（reward magnitude inflation）或语义偏移，破坏双层优化的理论保证。这正是本文在第三章提出奖励函数更新约束机制的内在动机。
+
+\section{基于人类反馈的强化学习}
+\label{sec:rlhf}
+
+\subsection{人类偏好数据的收集与处理}
+
+基于人类反馈的强化学习（Reinforcement Learning from Human Feedback, RLHF）\cite{christiano2017deep,ouyang2022training,ziegler2019fine}是目前产业界最广泛部署的大模型对齐范式，其核心思想是以人类偏好判断作为监督信号，引导语言模型的行为向符合人类价值观的方向优化。RLHF的完整流程涵盖三个阶段：监督微调（Supervised Fine-Tuning, SFT）、奖励模型训练（Reward Model Training, RM）以及基于PPO的策略优化。
+
+偏好数据的收集是RLHF流程的起点，其质量直接决定对齐效果的上限。标准流程如下：首先从提示数据库 $\mathcal{D}_{\text{prompt}}$ 抽取提示 $x$；随后从当前语言模型（或多个版本）采样若干响应 $\{y_1, y_2, \ldots, y_K\}$，通常取 $K=2$ 进行成对比较；由经过培训的人类标注员依据预定义评估准则（有用性、无害性、诚实性等）比较响应，记录偏好关系 $y_w \succ y_l | x$（$y_w$ 为偏好响应，$y_l$ 为非偏好响应）；最终汇总为偏好数据集 $\mathcal{D} = \{(x^{(i)}, y_w^{(i)}, y_l^{(i)})\}_{i=1}^N$\cite{ouyang2022training}。
+
+标注质量是偏好数据收集的核心挑战\cite{cui2023ultrafeedback}。偏好判断具有主观性，标注一致性通常仅有60\%至80\%。实践中常通过多人标注多数表决、黄金标准样本校准、置信度加权训练及AI辅助标注（如Constitutional AI\cite{bai2022constitutional}）等措施提升质量。
+
+偏好数据的多样性同样至关重要\cite{cui2023ultrafeedback}。UltraFeedback\cite{cui2023ultrafeedback}聚合多个来源（代码、数学、写作、问答等），以GPT-4为响应评分，构建了大规模多维度偏好数据集，显著提升了奖励模型的泛化能力。此外，奖励差距过小的样本学习信号微弱，差距过大的样本训练价值有限，合理的差距分布是数据构建的重要考量。
+
+\subsection{Bradley-Terry偏好模型}
+
+RLHF奖励建模的核心在于将人类偏好判断转化为可微分的训练目标，这需要为偏好数据建立概率模型。Bradley-Terry（BT）模型\cite{bradley1952rank}是配对比较数据建模的经典框架，最初用于体育赛事中球队实力的排名估计，后被广泛应用于信息检索、推荐系统和人类反馈建模领域。
+
+BT模型假设每条响应 $y$ 在提示 $x$ 下具有一个潜在实力分数（即奖励值）$r(x,y) \in \mathbb{R}$。给定两条响应 $(y_1, y_2)$，人类偏好 $y_1$ 优于 $y_2$ 的概率为：
+\begin{equation}
+    P(y_1 \succ y_2 | x) = \sigma\left(r(x, y_1) - r(x, y_2)\right) = \frac{\exp(r(x,y_1))}{\exp(r(x,y_1)) + \exp(r(x,y_2))}
+    \label{eq:bt_model}
+\end{equation}
+其中 $\sigma(z) = 1/(1+e^{-z})$ 为sigmoid函数。BT模型具有以下重要性质：（1）对称性：$P(y_1 \succ y_2 | x) + P(y_2 \succ y_1 | x) = 1$；（2）传递性弱约束：若 $r(x,y_1) > r(x,y_2) > r(x,y_3)$，则 $P(y_1 \succ y_3 | x) > \max(P(y_1 \succ y_2 | x), P(y_2 \succ y_3 | x))$；（3）奖励平移不变性：奖励函数加任意常数 $c$ 不影响任何配对比较的概率。
+
+BT模型的一个重要推广是Plackett-Luce模型，将配对比较扩展至 $K$ 候选的完整排名，一次排名任务可产生 $\binom{K}{2}$ 对比较信息。BT模型假设偏好构成全序关系，在存在循环偏好的场景下存在系统性偏差，但其简洁有效性使其仍是实践中奖励建模的主流选择\cite{ouyang2022training}。
+
+\subsection{奖励模型训练}
+
+给定偏好数据集 $\mathcal{D} = \{(x^{(i)}, y_w^{(i)}, y_l^{(i)})\}_{i=1}^N$ 与BT偏好模型，奖励模型 $r_\psi(x,y)$（参数为 $\psi$）通过最大化偏好数据的对数似然进行训练，等价于最小化如下交叉熵损失：
+\begin{equation}
+    \mathcal{L}_{\text{RM}}(\psi) = -\mathbb{E}_{(x, y_w, y_l) \sim \mathcal{D}}\left[\log \sigma\left(r_\psi(x, y_w) - r_\psi(x, y_l)\right)\right]
+    \label{eq:rm_loss}
+\end{equation}
+该损失函数要求奖励模型对偏好响应 $y_w$ 的评分显著高于非偏好响应 $y_l$：当 $r_\psi(x,y_w) - r_\psi(x,y_l) \gg 0$ 时损失趋近零，差值为负时损失显著增大。
+
+在架构设计上，奖励模型通常以大规模预训练语言模型（如LLaMA-3\cite{dubey2024llama3}、Qwen2.5等）初始化，在最后一层Transformer隐状态之上添加线性映射头，将序列末尾词元的隐状态映射为标量奖励值 $r_\psi(x,y) \in \mathbb{R}$\cite{ziegler2019fine}。初始化策略对训练效果有重要影响：以SFT模型（而非预训练基础模型）作为初始化通常能获得更高的偏好预测准确率，原因在于SFT模型已具备理解对话内容和遵从指令的基本能力\cite{ouyang2022training}。
+
+奖励模型训练中的过拟合是一个不可忽视的问题\cite{gao2023scaling}。在有限偏好数据上训练的奖励模型，可能捕捉到训练分布的表面特征（如响应长度、格式规范等）而非深层质量信号。研究发现，奖励模型存在长度偏好（longer-is-better bias）：即便内容质量无显著优势，奖励模型也倾向于为更长的响应分配更高评分\cite{zheng2023secrets}。缓解措施包括：在训练中加入长度惩罚项、在数据处理阶段对不同长度样本进行平衡，或在评估指标中显式控制长度因素。
+
+奖励模型的校准（calibration）是评估可靠性的重要维度\cite{li2023reward}：过度自信的模型给出过于极端的奖励差，导致策略过度响应；欠置信的模型则优化信号不足。通常在保留测试集上评估成对偏好准确率与ECE指标。此外，奖励模型规模与性能之间存在明显的缩放规律\cite{gao2023scaling}。
+
+\subsection{基于PPO的策略优化}
+
+完成奖励模型训练后，RLHF第三阶段以固定的奖励模型 $r_\psi$ 作为环境奖励信号，通过PPO算法优化语言模型策略 $\pi_\phi$。标准RLHF的策略优化目标为\cite{ouyang2022training}：
+\begin{equation}
+    \max_\phi\, \mathcal{J}_{\text{RLHF}}(\phi) = \mathbb{E}_{x \sim \mathcal{D},\, y \sim \pi_\phi(\cdot|x)}\left[r_\psi(x, y) - \beta \cdot \log\frac{\pi_\phi(y|x)}{\pi_{\text{ref}}(y|x)}\right]
+    \label{eq:rlhf_obj}
+\end{equation}
+其中 $\pi_{\text{ref}}$ 为参考策略（SFT模型），KL散度项 $\beta \log(\pi_\phi/\pi_{\text{ref}})$ 在词元级别计算——对生成序列中每个词元的对数概率比求和——以防止策略偏离参考模型过远。
+
+在实现层面，式~\eqref{eq:rlhf_obj}中的KL项通常被分解为词元级即时奖励：在序列每个位置 $t$，奖励为 $r_t = -\beta [\log \pi_\phi(a_t|s_t) - \log \pi_{\text{ref}}(a_t|s_t)]$，在序列终止位置额外叠加奖励模型评分 $r_\psi(x,y)$。如此设计使PPO的优势估计和GAE可直接应用于词元级别的时序决策过程\cite{zheng2023secrets}。
+
+PPO-RLHF的完整训练循环依次为：采样提示、生成响应、计算奖励（含词元级KL惩罚）、GAE优势估计、PPO截断目标梯度更新策略，以及价值网络更新，循环执行直至收敛\cite{zheng2023secrets}。
+
+KL系数 $\beta$ 的调度对训练稳定性至关重要：当实际KL散度超过目标值1.5倍时增大 $\beta$，低于目标值的 $1/1.5$ 时减小 $\beta$，保证优化过程既不过于保守也不过于激进。
+
+\subsection{分布偏移与奖励过优化}
+
+RLHF范式存在一个根本性结构缺陷：奖励模型在偏好数据上训练完成后参数即被冻结，不再随策略的演化而更新；而策略在PPO优化过程中持续生成新样本，其生成分布随迭代步数的增加逐渐偏离奖励模型的训练分布。这一现象称为分布偏移（distribution shift），是RLHF中奖励过优化（reward over-optimization）的根本成因\cite{gao2023scaling}。
+
+Gao等人\cite{gao2023scaling}通过大量实验系统量化了奖励过优化现象：随着策略与参考模型之间的KL散度 $d$ 增大，代理奖励单调递增，而黄金奖励先升后降，近似满足 $r_{\text{gold}}(d) \approx \alpha \sqrt{d} - \beta d$，存在峰值点 $d^* = (\alpha/2\beta)^2$，超过该阈值后策略进入奖励黑客（reward hacking）区域。其根本原因在于：奖励模型在训练分布之外存在系统性高估误差，策略优化发现并利用这些高估区域，产生代理奖励高而实际质量差的响应。
+
+面对上述挑战，缓解方案主要包括\cite{moskovitz2023fool,gao2023scaling}：加强KL散度约束以压制策略偏移、奖励模型集成以减少单一模型漏洞利用，以及在策略优化过程中动态收集当前策略样本的偏好标注、持续更新奖励模型。最后一种方案将奖励模型由静态转为动态组件，从根本上消除分布偏移，亦是本文第三章提出方法的核心动机。实证表明，在线迭代对齐方法能将奖励过优化程度降低5至15个百分点\cite{tajwar2024preference,online_rlhf_2025}。
+
+\section{直接偏好优化}
+\label{sec:dpo}
+
+\subsection{从RLHF目标到DPO损失的推导}
+
+直接偏好优化（Direct Preference Optimization, DPO）\cite{rafailov2023direct}从式~\eqref{eq:kl_constrained}的KL约束强化学习目标出发，通过代数变换将RLHF的两阶段流程（奖励建模与PPO优化）压缩为对偏好数据的单阶段监督学习，消除了显式奖励模型和在线采样的需要。
+
+DPO推导的关键步骤如下。据式~\eqref{eq:boltzmann}，KL约束RL目标的最优策略满足：
+\begin{equation}
+    \pi^*(y|x) = \frac{\pi_{\text{ref}}(y|x) \exp(r^*(x,y)/\beta)}{Z(x)}
+\end{equation}
+对两边取对数并整理，得到奖励函数的策略参数化表示（即式~\eqref{eq:reward_reparam}）：
+\begin{equation}
+    r^*(x, y) = \beta \log \frac{\pi^*(y|x)}{\pi_{\text{ref}}(y|x)} + \beta \log Z(x)
+    \label{eq:dpo_reparam}
+\end{equation}
+该式表明，给定最优策略 $\pi^*$，奖励函数 $r^*$ 可被唯一确定（至多相差一个仅依赖 $x$ 的加性常数 $\beta \log Z(x)$）。
+
+将式~\eqref{eq:dpo_reparam}代入Bradley-Terry偏好概率式~\eqref{eq:bt_model}：由于 $\beta \log Z(x)$ 在计算两条响应的奖励差时相互抵消，得到：
+\begin{align}
+    P^*(y_w \succ y_l | x) &= \sigma\left(r^*(x,y_w) - r^*(x,y_l)\right) \notag \\
+    &= \sigma\left(\beta \log \frac{\pi^*(y_w|x)}{\pi_{\text{ref}}(y_w|x)} - \beta \log \frac{\pi^*(y_l|x)}{\pi_{\text{ref}}(y_l|x)}\right)
+    \label{eq:dpo_preference}
+\end{align}
+式~\eqref{eq:dpo_preference}直接建立了偏好概率与策略参数的联系，无需显式奖励模型作为中介。以参数化策略 $\pi_\phi$ 替换最优策略 $\pi^*$，对偏好数据进行最大似然估计，即得DPO损失：
+\begin{equation}
+    \mathcal{L}_{\text{DPO}}(\phi) = -\mathbb{E}_{(x, y_w, y_l) \sim \mathcal{D}}\left[\log \sigma\left(\beta \log \frac{\pi_\phi(y_w|x)}{\pi_{\text{ref}}(y_w|x)} - \beta \log \frac{\pi_\phi(y_l|x)}{\pi_{\text{ref}}(y_l|x)}\right)\right]
+    \label{eq:dpo_loss}
+\end{equation}
+DPO将奖励模型隐式参数化于语言模型自身：给定策略 $\pi_\phi$，其隐式奖励为 $\hat{r}_\phi(x,y) = \beta \log \pi_\phi(y|x)/\pi_{\text{ref}}(y|x)$。最小化 $\mathcal{L}_{\text{DPO}}$ 等价于对隐式奖励进行偏好对比训练，使偏好响应的隐式奖励高于非偏好响应。
+
+从信息论角度，DPO损失可解释为最小化参数化偏好分布 $P_\phi(y_w \succ y_l | x)$ 与经验偏好分布之间的KL散度，等价于在偏好数据上进行最大似然估计。DPO的训练过程完全等价于在偏好数据对上做对比学习（contrastive learning），无需任何额外的强化学习基础设施。其实现复杂度大幅低于PPO-RLHF，所需计算资源和工程投入显著减少，这是DPO迅速获得学术界和工业界广泛关注的重要原因\cite{rafailov2023direct}。
+
+\subsection{DPO的隐式奖励与梯度分析}
+
+DPO实际优化的目标可通过分析其隐式奖励函数加以厘清。DPO的隐式奖励函数定义为：
+\begin{equation}
+    \hat{r}_\phi(x, y) = \beta \log \frac{\pi_\phi(y|x)}{\pi_{\text{ref}}(y|x)} = \beta \sum_{t=1}^{|y|} \log \frac{\pi_\phi(y_t | x, y_{<t})}{\pi_{\text{ref}}(y_t | x, y_{<t})}
+    \label{eq:dpo_implicit_reward}
+\end{equation}
+即策略 $\pi_\phi$ 与参考策略 $\pi_{\text{ref}}$ 之间的序列级对数概率比，可按词元级别分解为各位置对数概率比之和。该隐式奖励的含义是：相对于参考策略，当前策略更倾向于生成该响应的程度——正值表示 $\pi_\phi$ 相对于 $\pi_{\text{ref}}$ 更偏好该响应，负值则相反。
+
+对DPO损失关于策略参数 $\phi$ 的梯度进行分析，可揭示DPO的优化行为。定义 $h_w = \beta \log \pi_\phi(y_w|x)/\pi_{\text{ref}}(y_w|x)$ 和 $h_l = \beta \log \pi_\phi(y_l|x)/\pi_{\text{ref}}(y_l|x)$，DPO损失的梯度为：
+\begin{align}
+    \nabla_\phi \mathcal{L}_{\text{DPO}} = -\mathbb{E}_{(x,y_w,y_l) \sim \mathcal{D}} \Big[ &\sigma(h_l - h_w) \cdot \beta \Big(\nabla_\phi \log \pi_\phi(y_w|x) \notag \\
+    &- \nabla_\phi \log \pi_\phi(y_l|x)\Big) \Big]
+    \label{eq:dpo_gradient}
+\end{align}
+式~\eqref{eq:dpo_gradient}揭示了DPO的关键性质：梯度以权重 $\sigma(h_l - h_w)$ 对每个样本加权，该权重恰好等于当前隐式奖励模型对该偏好对的"犯错概率"（即将 $y_l \succ y_w$ 判断为正确的概率）。当模型已能正确区分某对样本时（$h_w \gg h_l$，即 $\sigma(h_l - h_w) \approx 0$），该样本对梯度的贡献趋近于零；对于难以区分的样本，DPO则自动赋予更高的训练权重，产生类似在线难样本挖掘（hard negative mining）的效果。
+
+梯度方向由两项构成：增大 $\log \pi_\phi(y_w|x)$（提高偏好响应的生成概率）和减小 $\log \pi_\phi(y_l|x)$（降低非偏好响应的生成概率）。然而，由于DPO是离线方法，无法控制梯度项 $\beta(\nabla_\phi \log \pi_\phi(y_w) - \nabla_\phi \log \pi_\phi(y_l))$ 的绝对量级。当 $y_w$ 在参考策略下的生成概率本已极低（即 $\log \pi_{\text{ref}}(y_w|x) \ll 0$）时，DPO训练可能反而进一步压低其绝对概率，只需其相对于 $y_l$ 的概率比提升即可满足损失下降的条件\cite{azar2024general}。这一"似然位移"（likelihood displacement）现象表明DPO并不总是增大偏好响应的绝对生成概率，在某些场景下可能引发模型退化。
+
+\subsection{DPO的变体方法}
+
+DPO发表后，学术界从多个角度提出了若干改进变体。\textbf{身份偏好优化（IPO）}\cite{azar2024general}将DPO的对数似然目标替换为对奖励差值的二次惩罚，要求 $h_w - h_l = 1/(2\beta)$ 维持在固定值而非趋向无穷大，有效抑制了在数据量有限时的过拟合倾向。\textbf{卡尼曼-特沃斯基优化（KTO）}\cite{ethayarajh2024kto}受前景理论启发，放弃成对偏好假设，改为对单条响应的绝对质量直接建模，仅需单点标注即可完成对齐，大幅降低了数据收集成本。\textbf{简单偏好优化（SimPO）}\cite{meng2024simpo}以序列平均对数概率代替对数概率比作为奖励代理，消除了DPO中对响应长度的系统性偏好，并引入目标奖励差 $\gamma$ 以避免优化结果过于接近决策边界；无需参考模型前向推断，显存效率更高。\textbf{信赖域DPO（TR-DPO）}\cite{gorbatovski2025trdpo}在训练中动态刷新参考策略，减少对分布外数据的依赖，在对话与摘要基准上优于标准DPO。\textbf{词元级DPO（TDPO）}\cite{zeng2024token}将偏好信号从序列级扩展至词元级，通过细粒度信用分配提供更精确的训练梯度。
+
+\subsection{DPO的优势与局限}
+
+DPO的主要优势体现在以下几个方面。\textbf{训练简洁性}：DPO将复杂的三阶段RLHF流程压缩为单阶段对比学习，无需维护价值函数网络、设计奖励塑形（reward shaping）策略或调节PPO的众多超参数，实现成本大幅降低。\textbf{理论等价性}：在Bradley-Terry假设和无限数据极限下，DPO与RLHF具有相同的最优策略，理论上能够恢复式~\eqref{eq:kl_constrained}的全局最优解。\textbf{训练稳定性}：DPO损失函数连续可微，梯度方差远小于基于采样的策略梯度方法，训练过程更为平稳，不存在PPO中常见的奖励崩溃（reward collapse）问题。
+
+然而，DPO存在若干固有局限性，这些局限性在很大程度上源于其离线（offline）学习的本质。\textbf{分布偏移问题}：DPO在固定偏好数据集 $\mathcal{D}$ 上训练，数据集中的响应来自数据收集时的策略（通常是SFT模型或其他固定模型），而非当前训练中的策略 $\pi_\phi$。随着 $\pi_\phi$ 参数不断更新，其生成分布与 $\mathcal{D}$ 中的数据分布可能产生显著偏差，导致训练信号逐渐脱离当前策略的实际分布，影响最终对齐效果\cite{tajwar2024preference}。研究表明，使用在线采样的偏好数据（即从当前策略采样响应后收集偏好）显著优于离线固定数据集上的DPO训练，印证了在线数据的重要性。
+
+\textbf{奖励信号静态性}：DPO将奖励隐式嵌入策略参数，缺乏对奖励信号的显式控制能力。在RLHF中，奖励模型可独立于策略进行校准、调整或替换；而在DPO中，"奖励"仅存在于策略对数概率比的函数形式中，无法在训练过程中独立调节其尺度或方向，也无法借助奖励模型的显式结构进行可解释性分析。\textbf{偏好标注噪声敏感性}：BT假设要求偏好具有严格的全序关系；当人类偏好存在循环、标注不一致或强度差异时，DPO的理论保证不再成立。实验表明，偏好数据中噪声标注较多时DPO性能显著下降，而具有鲁棒性约束的方法（如IPO）表现更为稳健\cite{azar2024general}。
+
+\textbf{长度偏差}：DPO以总对数概率（而非平均对数概率）计算隐式奖励，导致模型倾向于生成更长的响应——更长的序列在绝对概率比上更容易取得大值，即便生成质量并无实质提升\cite{meng2024simpo}。这一长度偏差在实际部署中可能导致模型输出冗余，需通过额外的后处理或长度惩罚机制加以修正。综上所述，尽管DPO在工程实用性上具有明显优势，其离线学习本质与奖励隐式性带来的局限性仍有待后续研究进一步改进。
+
+\section{各对齐方法综合对比}
+
+\subsection{方法体系梳理}
+
+纵观当前大语言模型对齐方法，可沿两个维度进行系统分类。第一个维度是奖励信号的来源与表示：RLHF使用显式参数化的奖励模型 $r_\psi$ 提供奖励信号；DPO及其变体（IPO、KTO、SimPO）将奖励隐式参数化为策略对数概率比，完全绕开显式奖励模型；IRL则通过逆向推断从专家示例中恢复奖励函数，奖励函数在训练过程中动态更新。第二个维度是策略优化方式：RLHF与IRL采用在线（online）策略采样配合策略梯度优化；DPO及大多数变体以离线（offline）偏好数据集进行对比学习；近年来出现的在线DPO（Online DPO）和迭代DPO（Iterative DPO）则试图融合两者的优势。
+
+从训练动态来看，各方法的核心差异在于奖励模型与策略模型的耦合程度。RLHF的两阶段方法耦合度最低：奖励模型训练后固定，策略独立优化，由此导致的分布外泛化问题也最为突出。DPO将奖励与策略合并为一体，消除了显式奖励模型，但也因此丧失了对奖励的独立控制能力。IRL框架的奖励与策略耦合最为紧密：两者在每次迭代中相互更新，奖励模型始终追踪当前策略的分布，从理论上消除了分布偏移问题，但同时也引入了双层优化的收敛性挑战。
+
+\subsection{综合对比分析}
+
+表~\ref{tab:method_comparison}从多个关键维度对各主要对齐方法进行系统对比，涵盖奖励建模方式、优化策略、数据要求、计算开销及在分布偏移下的鲁棒性等方面。
+
+\begin{table}[htbp]
     \centering
-    \caption{表格标题}
-    \label{tab:undergraduate-example}
-    \begin{tabularx}{\textwidth}{CCCC}
+    \caption{大语言模型对齐方法综合对比}
+    \label{tab:method_comparison}
+    \small
+    \setlength{\tabcolsep}{10pt}
+    \renewcommand{\arraystretch}{1.3}
+    \begin{tabular}{lcccc c}
         \toprule
-        $A$ & $B$ & $A+B$ & $A\times B$ \\ \midrule
-        1   & 6   & 7     & 6           \\
-        2   & 7   & 9     & 14          \\
-        3   & 8   & 11    & 24          \\ \bottomrule
-    \end{tabularx}
+        \textbf{方法} & \textbf{优化方式} & \textbf{数据类型} & \textbf{计算开销} & \textbf{偏移鲁棒性} & \textbf{工程复杂度} \\
+        \midrule
+        RLHF/PPO  & 在线RL   & 偏好对   & 高 & 弱 & 高 \\
+        DPO       & 离线对比 & 偏好对   & 低 & 弱 & 低 \\
+        IPO       & 离线对比 & 偏好对   & 低 & 中 & 低 \\
+        KTO       & 离线对比 & 单点标注 & 低 & 中 & 低 \\
+        SimPO     & 离线对比 & 偏好对   & 低 & 中 & 低 \\
+        MaxEnt IRL & 在线RL  & 专家示例 & 高 & 强 & 高 \\
+        GAIL      & 在线RL   & 专家示例 & 高 & 强 & 高 \\
+        本文方法  & 在线RL   & 偏好对   & 中 & 强 & 中 \\
+        \bottomrule
+    \end{tabular}
 \end{table}
 
-\section{插图}
-测试下文章内的图片引用。如\autoref{fig:undergraduate-example} 和\autoref{fig:undergraduate-example2} 所示，
-这是两幅插图。在这其中\autoref{subfig:undergraduate-example2-subfig1} 是第一幅子图，
-\autoref{subfig:undergraduate-example2-subfig2} 是第二幅子图。
+由表~\ref{tab:method_comparison}可归纳出三条规律性结论。第一，\textbf{奖励表示与分布鲁棒性存在权衡}：显式奖励模型方法（RLHF、IRL）在理论上具有更强的分布鲁棒性潜力，但需要更多计算资源和工程投入；隐式奖励方法（DPO及变体）简洁高效，但牺牲了对奖励信号的独立控制能力与分布外的鲁棒性。第二，\textbf{在线与离线之间存在系统性性能差距}：Tajwar等人\cite{tajwar2024preference}通过系统实验证明，在线偏好数据（来自当前策略分布）能显著提升对齐效果，离线DPO在分布偏移下的性能损失高达5至15个百分点。第三，\textbf{数据效率与计算效率之间存在互换关系}：IRL框架通过持续更新奖励模型实现更高的数据效率，但每次奖励更新需要额外的前向传播计算；DPO类方法以一次性固定数据换取更低的训练成本，在数据充足时具有工程优势。
 
-\begin{figure}[htb]
-    \centering
-    \includegraphics[scale=0.5]{example.png}
-    \caption{这里是个普通的标题}
-    \label{fig:undergraduate-example}
-\end{figure}
+\textbf{理论保证的层次差异}：KL约束RLHF目标（式~\eqref{eq:kl_constrained}）具有精确的闭式最优解（式~\eqref{eq:boltzmann}），DPO在无限数据假设下等价于该目标的最优解；MaxEnt IRL在最大熵假设下有严格的概率论基础（式~\eqref{eq:maxent_distribution}）；IPO、KTO、SimPO等变体则分别从过拟合正则化、前景理论和长度偏差校正等角度提供了各自的理论支撑，但与原始RLHF目标的等价性相对较弱。综合以上分析，现有方法在鲁棒性、计算效率与理论保证之间难以兼顾；本文在第三章提出的方法通过将IRL的动态奖励更新机制与可证明的改进下界约束相结合，在保持在线训练优势的同时从理论与工程两个层面系统保证了双层优化的数值稳定性，在上述三个维度上实现了更优的平衡。
 
-\begin{figure}[htb]
-    \centering
-    \begin{minipage}[t]{0.96\textwidth}
-        \centering
-        \begin{subfigure}[t]{0.47\textwidth}
-            \centering
-            \includegraphics[scale=0.5]{example.png}
-            \caption{这是第一个子图标题}
-            \label{subfig:undergraduate-example2-subfig1}
-        \end{subfigure}
-        \begin{subfigure}[t]{0.47\textwidth}
-            \centering
-            \includegraphics[scale=0.5]{example.png}
-            \caption{这是第二个子图标题}
-            \label{subfig:undergraduate-example2-subfig2}
-        \end{subfigure}
-    \end{minipage}
-    \caption{这里是另一个普通的标题}
-    \label{fig:undergraduate-example2}
-\end{figure}
+\section{本章小结}
 
-\section{公式示例}
-这里给出正文中的公式引用示例。行内公式可写为 $E=mc^2$，独立编号公式如\autoref{eq:undergraduate-quadratic-formula} 所示，多行推导公式如\autoref{eq:undergraduate-gaussian-sum} 所示。
+本章系统梳理了大语言模型对齐所涉及的核心理论基础与关键方法，为后续章节奠定理论基础。
 
-\begin{equation}
-    x = \frac{-b \pm \sqrt{b^2 - 4ac}}{2a}
-    \label{eq:undergraduate-quadratic-formula}
-\end{equation}
+在强化学习基础方面，本章给出了MDP的严格数学定义，推导了Bellman期望方程与最优方程体系，建立了价值函数、Q函数与优势函数的关系；以策略梯度定理为出发点，介绍了REINFORCE、Actor-Critic与GAE，详细阐述了PPO的截断目标与训练机制；尤为重要的是，严格推导了KL散度约束策略优化的Boltzmann最优解（式~\eqref{eq:boltzmann}）与奖励的策略参数化表示（式~\eqref{eq:reward_reparam}），二者是DPO推导与第三章理论分析的核心工具。
 
-\begin{equation}
-    \begin{aligned}
-        \sum_{i=1}^{n} i &= 1 + 2 + \cdots + n \\
-                         &= \frac{n(n+1)}{2}
-    \end{aligned}
-    \label{eq:undergraduate-gaussian-sum}
-\end{equation}
+在逆强化学习方面，推导了最大熵IRL的概率生成模型与梯度结构，揭示了其与能量模型训练的等价联系；梳理了GAIL的对抗博弈框架；建立了奖励—策略双层优化的数学框架，分析了均衡条件与实践近似策略，阐明了奖励更新约束的内在必要性。
+
+在RLHF与DPO方面，推导了Bradley-Terry模型、奖励模型训练目标与PPO策略优化目标，定量分析了奖励过优化现象；完整推导了DPO损失函数，分析了隐式奖励机制与梯度结构，综述了IPO、KTO、SimPO、TR-DPO等主要变体，并客观评析了DPO的优势与局限。章末综合对比表~\ref{tab:method_comparison}归纳了各方法在鲁棒性、计算效率与理论保证之间的权衡关系，为第三章提出融合IRL与受约束优化的新方法提供了充分依据。
