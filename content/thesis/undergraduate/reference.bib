@@ -1,4 +1,4 @@
-%% 第一章参考文献
+%% References
 
 @article{brown2020language,
   author  = {Brown, Tom and Mann, Benjamin and Ryder, Nick and Subbiah, Melanie and Kaplan, Jared D and Dhariwal, Prafulla and Neelakantan, Arvind and Shyam, Pranav and Sastry, Girish and Askell, Amanda and others},
@@ -36,7 +36,7 @@
 }
 
 @article{gao2023scaling,
-  author  = {Gao, Leo and Biderman, Stella and Black, Sid and Golding, Laurence and Hoppe, Travis and Foster, Charles and Phang, Jason and He, Horace and Thite, Anish and Nabeshima, Noa and others},
+  author  = {Gao, Leo and Schulman, John and Hilton, Jacob},
   title   = {Scaling Laws for Reward Model Overoptimization},
   journal = {Proceedings of the 40th International Conference on Machine Learning},
   year    = {2023},
@@ -44,7 +44,7 @@
 }
 
 @inproceedings{moskovitz2023fool,
-  author    = {Moskovitz, Ted and Aslanides, John and Gretton, Arthur and Millidge, Beren and Singh, Aaditya K},
+  author    = {Moskovitz, Ted and Singh, Aaditya K and Strouse, DJ and Sandholm, Tuomas and Salakhutdinov, Ruslan and Dragan, Anca D and McAleer, Stephen},
   title     = {Confronting Reward Model Overoptimization with Constrained RLHF},
   booktitle = {The Twelfth International Conference on Learning Representations},
   year      = {2024}
@@ -59,23 +59,17 @@
 }
 
 @inproceedings{wulfmeier2024irl,
-  author    = {Wulfmeier, Markus and Rao, Dushyant and Chen, Hubert and Byravan, Arunkumar and Hasenclever, Leonard and Riedmiller, Martin and Heess, Nicolas},
-  title     = {Foundations of Human Feedback for Large Language Models},
-  booktitle = {arXiv preprint arXiv:2409.02085},
-  year      = {2024}
+  author    = {Wulfmeier, Markus and Bloesch, Michael and Vieillard, Nino and Ahuja, Arun and Bornschein, Jorg and Huang, Sandy and Sokolov, Artem and Barnes, Matt and Desjardins, Guillaume and others},
+  title     = {Imitating Language via Scalable Inverse Reinforcement Learning},
+  booktitle = {Advances in Neural Information Processing Systems},
+  year      = {2024},
+  volume    = {37}
 }
 
 @inproceedings{zeng2024token,
-  author    = {Zeng, Yifan and Liu, Huazheng and Long, Qi and Wang, Mingzhang and Liao, Heng},
+  author    = {Zeng, Yongcheng and Liu, Guoqing and Ma, Weiyu and Yang, Ning and Zhang, Haifeng and Wang, Jun},
   title     = {Token-level Direct Preference Optimization},
   booktitle = {Proceedings of the 41st International Conference on Machine Learning},
-  year      = {2024}
-}
-
-@inproceedings{chen2024trust,
-  author    = {Chen, Zhixuan and Wen, Lichen and Wang, Guoqiang and Sun, Yansen and Xu, Pan},
-  title     = {Regularized Best-of-N Sampling to Mitigate Reward Hacking for Language Model Alignment},
-  booktitle = {arXiv preprint arXiv:2404.01054},
   year      = {2024}
 }
 
@@ -87,25 +81,24 @@
 }
 
 @inproceedings{li2023reward,
-  author    = {Li, Ziniu and Xu, Tian and Zhang, Yushun and Yu, Yang and Sun, Ruoyu and Luo, Zhi-Quan},
-  title     = {Remax: A Simple, Effective, and Efficient Method for Aligning Large Language Models},
+  author    = {Li, Ziniu and Xu, Tian and Zhang, Yushun and Lin, Zhihang and Yu, Yang and Sun, Ruoyu and Luo, Zhi-Quan},
+  title     = {{ReMax}: A Simple, Effective, and Efficient Reinforcement Learning Method for Aligning Large Language Models},
   booktitle = {Proceedings of the 41st International Conference on Machine Learning},
   year      = {2024}
 }
 
 @article{li2024imitation,
-  author  = {Li, Ziniu and Xu, Tian and Zhang, Yushun and Luo, Zhi-Quan},
-  title   = {Imitation Learning from Imperfection: Theoretical Justifications and Algorithms},
-  journal = {Advances in Neural Information Processing Systems},
-  year    = {2024},
-  volume  = {37}
+  author  = {Li, Ziniu and Xu, Tian and Yu, Yang and Luo, Zhi-Quan},
+  title   = {Theoretical Analysis of Offline Imitation With Supplementary Dataset},
+  journal = {arXiv preprint arXiv:2301.11687},
+  year    = {2023}
 }
 
 @inproceedings{li2024preserving,
-  author    = {Li, Ziniu and Xu, Tian and Luo, Zhi-Quan},
-  title     = {Preserving Pre-Training Gains with Constrained Optimization for Alignment},
-  booktitle = {arXiv preprint arXiv:2403.09099},
-  year      = {2024}
+  author    = {Li, Ziniu and Chen, Congliang and Xu, Tian and Qin, Zeyu and Xiao, Jiancong and Luo, Zhi-Quan and Sun, Ruoyu},
+  title     = {Preserving Diversity in Supervised Fine-Tuning of Large Language Models},
+  booktitle = {The Thirteenth International Conference on Learning Representations},
+  year      = {2025}
 }
 
 @inproceedings{devlin2018bert,
@@ -123,39 +116,44 @@
   year    = {2018}
 }
 
-@article{openai2025gpt5,
+@online{openai2026gpt55,
   author  = {{OpenAI}},
-  title   = {{GPT-5} Technical Report},
-  journal = {arXiv preprint arXiv:2507.05552},
-  year    = {2025}
+  title   = {{GPT-5.5} System Card},
+  date    = {2026-04-23},
+  url     = {https://openai.com/index/gpt-5-5-system-card/},
+  urldate = {2026-05-21}
 }
 
-@article{geminiteam2025gemini3,
+@online{geminiteam2026gemini31,
   author  = {{Google DeepMind}},
-  title   = {Gemini 3 Technical Report},
-  journal = {Technical Report, Google DeepMind},
-  year    = {2025}
+  title   = {{Gemini 3.1 Pro} Model Card},
+  date    = {2026-02-19},
+  url     = {https://deepmind.google/models/model-cards/gemini-3-1-pro/},
+  urldate = {2026-05-21}
 }
 
-@article{anthropic2025claude4,
+@online{anthropic2026claudeopus47,
   author  = {{Anthropic}},
-  title   = {Claude Opus 4 Model Card},
-  journal = {Technical Report, Anthropic},
-  year    = {2025}
+  title   = {{Claude Opus 4.7}},
+  date    = {2026-04-16},
+  url     = {https://www.anthropic.com/news/claude-opus-4-7},
+  urldate = {2026-05-21}
 }
 
-@article{deepseekai2026deepseekv4,
+@online{deepseekai2026deepseekv4,
   author  = {{DeepSeek-AI}},
-  title   = {{DeepSeek-V4} Technical Report},
-  journal = {Technical Report, DeepSeek},
-  year    = {2026}
+  title   = {{DeepSeek-V4}: Towards Highly Efficient Million-Token Context Intelligence},
+  date    = {2026-04-24},
+  url     = {https://api-docs.deepseek.com/news/news260424},
+  urldate = {2026-05-22}
 }
 
-@article{qwenteam2026qwen36,
+@online{qwenteam2026qwen36,
   author  = {{Qwen Team}},
-  title   = {{Qwen3.6} Technical Report},
-  journal = {Technical Report, Alibaba Cloud},
-  year    = {2026}
+  title   = {{Qwen3.6-35B-A3B} Model Card},
+  date    = {2026-04},
+  url     = {https://huggingface.co/Qwen/Qwen3.6-35B-A3B},
+  urldate = {2026-05-22}
 }
 
 @article{touvron2023llama,
@@ -264,6 +262,16 @@
   volume    = {12}
 }
 
+@article{watkins1992q,
+  author  = {Watkins, Christopher J C H and Dayan, Peter},
+  title   = {{Q}-learning},
+  journal = {Machine Learning},
+  year    = {1992},
+  volume  = {8},
+  number  = {3--4},
+  pages   = {279--292}
+}
+
 @article{bradley1952rank,
   author  = {Bradley, Ralph Allan and Terry, Milton E},
   title   = {Rank Analysis of Incomplete Block Designs: {I}. The Method of Paired Comparisons},
@@ -275,7 +283,7 @@
 }
 
 @article{online_rlhf_2025,
-  author  = {Anonymous},
+  author  = {Wang, Zhichao and Ramnath, Kiran and Bi, Bin and Pentyala, Shiva Kumar and Chaudhuri, Sougata and Mehrotra, Shubham and Zhu, Zixu James and Mao, Xiang-Bo and Asur, Sitaram and Cheng, Na Claire},
   title   = {Reinforcement Learning for {LLM} Post-Training: A Survey},
   journal = {arXiv preprint arXiv:2407.16216},
   year    = {2025}
@@ -289,24 +297,24 @@
 }
 
 @article{zeng2025d2r,
-  author  = {Zeng, Siliang and others},
+  author  = {Zeng, Siliang and Liu, Yao and Rangwala, Huzefa and Karypis, George and Hong, Mingyi and Fakoor, Rasool},
   title   = {From Demonstrations to Rewards: Alignment Without Explicit Human Preferences},
   journal = {arXiv preprint arXiv:2503.13538},
   year    = {2025}
 }
 
 @article{irl_llm_survey_2025,
-  author  = {Anonymous},
+  author  = {Sun, Hao and van der Schaar, Mihaela},
   title   = {Inverse Reinforcement Learning Meets Large Language Model Post-Training: Basics, Advances, and Opportunities},
   journal = {arXiv preprint arXiv:2507.13158},
   year    = {2025}
 }
 
 @article{cheng2026drirl,
-  author  = {Cheng, Rosy and others},
+  author  = {Cheng, Ruoxi and Ma, Haoxuan and Wang, Weixin and Duan, Ranjie and Liu, Jiexi and Jia, Xiaoshuang and Qin, Simeng and Cao, Xiaochun and Liu, Yang and Jia, Xiaojun},
   title   = {Inverse Reinforcement Learning with Dynamic Reward Scaling for {LLM} Alignment},
   journal = {arXiv preprint arXiv:2503.18991},
-  year    = {2026}
+  year    = {2025}
 }
 
 @article{dubey2024llama3,
@@ -337,86 +345,4 @@
   journal = {Advances in Neural Information Processing Systems},
   year    = {2024},
   volume  = {37}
-}
-
-%% 示例参考文献
-
-% 期刊
-@article{周融2003,
-  author  = {周融 and 任志国 and 杨尚雷 and 厉星星},
-  title   = {对新形势下毕业设计管理工作的思考与实践},
-  journal = {电气电子教学学报},
-  year    = {2003},
-  volume  = {283},
-  number  = {6},
-  pages   = {107--109}
-}
-
-% 论文集
-@inproceedings{伍蠡甫,
-  author     = {伍蠡甫},
-  title      = {论艺术的真实性},
-  bookauthor = {中国高等学校自然科学学报研究会},
-  booktitle  = {科技编辑学论文集},
-  location   = {北京},
-  publisher  = {北京师范大学出版社},
-  year       = {1998},
-  pages      = {12--17}
-}
-
-% 专著
-@book{图书馆,
-  author    = {刘国钧 and 王连成},
-  title     = {图书馆史研究},
-  edition   = {2},
-  address   = {北京},
-  publisher = {高等教育出版社},
-  year      = {1979},
-  pages     = {15--18}
-}
-
-% 学位论文
-@thesis{张筑生,
-  author      = {张筑生},
-  title       = {微分半动力系统的不变集},
-  address     = {北京},
-  institution = {北京大学数学系数学研究所},
-  date        = {1983}
-}
-
-% 标准
-@standard{gbt7714_2006,
-  author    = {中国国家标准化管理委员会},
-  number    = {GB/T 16159—1996},
-  title     = {汉语拼音正词法基本规则},
-  address   = {北京},
-  publisher = {中国标准出版社},
-  year      = {2006}
-}
-
-% 科技报告
-@report{冯西桥1998,
-  author      = {冯西桥},
-  title       = {核反应堆管道和压力容器的LBB分析},
-  subtitle    = {XX00100101},
-  location    = {北京},
-  institution = {清华大学核能技术设计研究院},
-  year        = {1997}
-}
-
-% 专利
-@patent{姜锡洲,
-  author   = {姜锡洲},
-  title    = {一种温热外敷药制备方案},
-  location = {中国},
-  number   = {881056073},
-  date     = {1989-07-26}
-}
-
-% 电子文献
-@other{中国大学学报论文文摘,
-  author = {万锦},
-  title  = {中国大学学报论文文摘},
-  date   = {1996-01-01},
-  url    = {http://www.example.com}
 }

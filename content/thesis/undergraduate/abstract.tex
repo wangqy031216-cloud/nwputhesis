@@ -2,12 +2,22 @@
 
 % 中文摘要
 \begin{abstract}
-    这是一个适用于西北工业大学学位论文写作的文档类模板 \textbf{nwputhesis}，模板来源：\url{https://github.com/1195343015/nwputhesis}。
-    \keywordslist{学位论文, 模板}
+本文研究大语言模型偏好对齐中的奖励函数学习问题，核心目标是从专家偏好示例中恢复可用于策略优化的奖励信号，并在策略分布持续变化时保持该信号稳定。基于人类反馈的强化学习通常使用固定奖励模型进行在线优化，策略生成分布会随训练逐渐偏离奖励模型的训练分布，导致奖励评分可靠性下降，并进一步引发奖励模型过优化和奖励黑客问题。逆强化学习将奖励函数视为可学习对象，能够在策略更新的同时调整奖励；但若缺少对奖励变化幅度的约束，相邻轮次奖励函数容易出现尺度膨胀或语义漂移，从而破坏训练稳定性。因此，偏好对齐的难点不仅在于单轮偏好拟合精度，还在于策略持续变化时奖励函数能否保持可追踪的更新幅度和稳定尺度。
+
+本文提出近端奖励反演优化方法PIRO（Proximal Inverse Reward Optimization）。PIRO在逆强化学习框架下动态学习奖励函数，并限制相邻迭代轮次之间的奖励变化幅度，使奖励模型能够适应当前策略分布，同时避免多轮迭代中的无约束漂移。理论上，本文将大模型偏好对齐建模为奖励学习与策略优化耦合的双层问题，推导局部替代目标与原始目标之间的改进下界，说明奖励变化误差项会影响原始对齐目标的稳定改进。算法上，本文用相邻轮次奖励输出的均方根差（RMSD）近似奖励变化幅度，并设计自适应约束系数调节机制，将理论误差控制项转化为训练过程中可观测、可调节的稳定性反馈信号。
+
+本文在TL;DR摘要生成和UltraFeedback通用指令跟随两个任务上进行验证。TL;DR任务中，PIRO在iter5取得奖励评分$1.415$，相较固定奖励RLHF/PPO提升约$14.1\%$，相较SFT提升约$30.0\%$；去除 $C\epsilon$ 约束项后，模型在早期短暂上升，随后持续退化，说明奖励变化约束对多轮IRL训练稳定性具有必要作用。UltraFeedback任务中，PIRO最佳检查点的MT-Bench Avg(8)为$7.53$，超过SFT、DPO、RLHF(PPO)、RLHF(GRPO)以及无约束IRL基线，并在推理和STEM等维度上取得较明显提升。两组实验表明，PIRO能够在动态奖励学习中抑制奖励漂移，提升多轮逆强化学习偏好对齐训练的稳定性。
+
+\keywordslist{大语言模型对齐, 逆强化学习, 奖励模型, RMSD约束, 策略优化}
 \end{abstract}
 
 % 英文摘要
 \begin{engabstract}
-    This is a document class template named \textbf{nwputhesis} for thesis writing at Northwestern Polytechnical University. Template source: \url{https://github.com/1195343015/nwputhesis}.
-    \engkeywordslist{thesis, template}
+This thesis studies reward-function learning for preference alignment of large language models. The goal is to recover a reward signal from expert preference demonstrations and keep this signal stable while the policy distribution changes. Reinforcement learning from human feedback usually optimizes a policy against a fixed reward model. As training proceeds, the policy distribution drifts away from the reward model's training distribution, reward evaluation becomes less reliable, and reward overoptimization may occur. Inverse reinforcement learning (IRL) treats the reward function as a learnable object and updates reward and policy together. However, unconstrained reward updates can inflate reward scales or shift reward semantics across iterations, thereby destabilizing training.
+
+This thesis proposes Proximal Inverse Reward Optimization (PIRO). PIRO dynamically learns the reward function in an IRL framework while bounding the reward change between adjacent iterations. The analysis formulates preference alignment as a bilevel problem coupling reward learning and policy optimization, and derives an improved lower bound that connects reward-change errors to improvement of the original alignment objective. The algorithm approximates reward change by the root mean square difference (RMSD) between reward outputs across iterations and uses an adaptive coefficient to control the strength of the constraint. In this way, the theoretical error-control term becomes an observable and adjustable stability signal during training.
+
+The method is evaluated on TL;DR summarization with Pythia-1B and UltraFeedback instruction following with Qwen3.5-9B. On TL;DR, PIRO reaches a reward score of $1.415 \pm 0.054$ at iter5, $14.1\%$ above RLHF/PPO and $30.0\%$ above SFT. Removing the $C\epsilon$ constraint leads to an early gain followed by degradation, indicating the necessity of constraining reward changes in iterative IRL training. On UltraFeedback, PIRO's best checkpoint scores $7.53$ on MT-Bench Avg(8), outperforming SFT, DPO, RLHF(PPO), RLHF(GRPO), and the unconstrained IRL baseline, with clearer gains on reasoning and STEM. These results indicate that PIRO can suppress reward drift and improve the stability of multi-round IRL-based preference alignment.
+
+\engkeywordslist{large language model alignment, inverse reinforcement learning, reward model, RMSD constraint, policy optimization}
 \end{engabstract}

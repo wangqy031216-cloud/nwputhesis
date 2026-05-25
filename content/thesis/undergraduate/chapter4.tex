@@ -3,21 +3,23 @@
 \chapter{实验设计与结果分析}
 \chaptermark{实验设计与结果分析}
 
-本章对第三章提出的基于受约束逆强化学习的对齐方法进行实验验证，开展两组互补的系统评测：其一在TL;DR摘要生成任务上，以Pythia-1B为底座验证RMSD约束机制对IRL训练稳定性的作用；其二在UltraFeedback通用指令跟随任务上，以Qwen3.5-9B为底座验证IRL-GRPO方法在多维度能力上的对齐效果。两组实验均在SLIME框架下实现，共用训练基础设施。
+本章对第三章提出的基于受约束逆强化学习的偏好对齐方法进行实验验证。两组实验分别对应本文题目的两个层面：TL;DR摘要生成任务用于检验IRL奖励更新约束是否能稳定偏好奖励学习，UltraFeedback通用指令跟随任务用于检验PIRO在更复杂大模型偏好对齐场景中的综合表现。两组实验均在SLIME框架下实现，共用训练基础设施。
 
 \section{实验设置}
 
 \subsection{训练框架与硬件环境}
 
-两组实验均基于SLIME框架实现，该框架由THUDM开源，是GLM系列模型后训练的核心工具链，支持PPO、GRPO、IRL等多种强化学习对齐算法，并为逆强化学习场景提供原生接口。
+两组实验均基于SLIME框架实现。该框架由THUDM开源，用于GLM系列模型的后训练，支持PPO、GRPO等强化学习对齐算法，并为逆强化学习场景提供原生接口。
 
-SLIME采用三模块解耦架构：\textbf{训练模块}（Training）基于Megatron-LM\cite{shoeybi2019megatronlm}实现，负责奖励模型与策略模型的参数更新，支持张量并行、流水线并行等分布式训练策略；\textbf{推理/采样模块}（Rollout）基于SGLang\cite{zheng2023sglang}实现，SGLang通过RadixAttention对KV缓存进行前缀感知的自动复用，并结合连续批处理提供高吞吐的策略rollout采样，将当前策略权重动态热加载至SGLang引擎后批量生成轨迹样本；\textbf{数据缓冲模块}（Data Buffer）作为桥梁在两者之间异步传递rollout数据与奖励标注结果。三模块解耦使训练与推理可在多节点上并行执行，避免PPO/GRPO多模型同时驻留同一GPU造成显存瓶颈。所有实验均在TODO（硬件配置）上运行。
+\begin{sloppypar}
+SLIME采用三模块解耦架构。\textbf{训练模块}（Training）基于Megatron-LM\cite{shoeybi2019megatronlm}实现，负责奖励模型与策略模型的参数更新，支持张量并行、流水线并行等分布式训练策略。\textbf{推理/采样模块}（Rollout）基于SGLang\cite{zheng2023sglang}实现，SGLang通过RadixAttention机制对KV缓存进行前缀感知的自动复用，配合连续批处理实现高吞吐策略采样；当前策略权重热加载至SGLang引擎后批量生成轨迹样本。\textbf{数据缓冲模块}（Data Buffer）在两者之间异步传递采样数据与奖励标注结果。三模块解耦使训练与推理在多节点上并行执行，避免多模型同时驻留同一GPU带来的显存压力。
+\end{sloppypar}
 
 \subsection{实验一：TL;DR摘要生成任务}
 
-TL;DR（Too Long; Didn't Read）数据集\cite{ouyang2022training}来源于Reddit帖子及其人工编写的摘要，是RLHF对齐研究中广泛使用的标准评测任务。给定原始帖子作为提示 $x$，模型需生成不超过53个词元的摘要响应 $y$，评测侧重响应是否准确、简洁地概括原文要点。
+TL;DR（Too Long; Didn't Read）数据集\cite{ouyang2022training}来源于Reddit帖子及其人工编写的摘要，常用于RLHF对齐研究的标准评测。给定原始帖子作为提示 $x$，模型需生成不超过53个词元的摘要响应 $y$，评测重点在响应是否准确、简洁地概括原文要点。
 
-本实验采用如下模型分工，各角色对应的HuggingFace路径见表~\ref{tab:model_roles}。\textbf{策略底座}为Pythia-1B，作为CIRL-A及所有需要从头优化的基线方法的初始化权重。\textbf{评估奖励模型}为Pythia-6.9B RM，用于对所有方法的生成响应进行客观量化评分，独立于训练过程，充当黄金奖励代理。\textbf{示例数据来源}为经PPO优化的6.9B参考策略，其生成样本作为IRL框架的专家示例数据集 $\mathcal{D}_E$。\textbf{SFT初始化}来自公开的1B SFT检查点。
+本实验采用的各种模型见表~\ref{tab:model_roles}。\textbf{策略底座}为Pythia-1B，用于PIRO及所有需要从头优化的基线方法的初始化权重。\textbf{评估奖励模型}为Pythia-6.9B RM，对各方法生成的响应进行量化评分，独立于训练过程，作为黄金奖励代理。\textbf{示例数据来源}为经PPO优化的6.9B参考策略，其生成样本作为IRL框架的专家示例数据集 $\mathcal{D}_E$。\textbf{SFT初始化}来自公开的1B SFT检查点。
 
 \begin{table}[htbp]
     \centering
@@ -25,150 +27,284 @@ TL;DR（Too Long; Didn't Read）数据集\cite{ouyang2022training}来源于Reddi
     \label{tab:model_roles}
     \small
     \renewcommand{\arraystretch}{1.2}
-    \begin{tabular}{lll}
+    \begin{tabular}{p{0.22\textwidth}p{0.22\textwidth}p{0.44\textwidth}}
         \toprule
-        \textbf{角色} & \textbf{规模} & \textbf{HuggingFace路径（\texttt{vwxyzjn/}前缀已省略）} \\
+        \textbf{角色} & \textbf{模型/来源} & \textbf{用途说明} \\
         \midrule
-        策略底座 & 1B & \texttt{EleutherAI/pythia-1b-deduped} \\
-        SFT初始化 & 1B & \texttt{..pythia-1b-deduped\_\_sft\_\_tldr} \\
-        评估奖励模型 & 6.9B & \texttt{..pythia-6.9b-deduped\_\_reward\_\_tldr} \\
-        示例来源（参考策略） & 6.9B & \texttt{..pythia-6.9b-deduped\_\_ppo\_left\_padding...\_\_tldr} \\
+        策略底座 & Pythia-1B & 作为PIRO及可训练基线的初始化权重 \\
+        SFT初始化 & 1B SFT检查点 & 提供监督微调基线和初始化参照 \\
+        评估奖励模型 & Pythia-6.9B RM & 离线评估各方法生成摘要的奖励评分 \\
+        示例来源 & 6.9B PPO策略 & 生成IRL专家示例数据集 $\mathcal{D}_E$ \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-\textbf{对比基线}：\textbf{SFT}仅在示例数据上做行为克隆，不进行奖励优化，作为性能下界；\textbf{RLHF/PPO}\cite{ouyang2022training}以固定的1B奖励模型提供奖励信号，使用\texttt{vwxyzjn}发布的公开1B PPO检查点；\textbf{DPO}\cite{rafailov2023direct}在TL;DR偏好数据集上离线训练，使用\texttt{vwxyzjn}发布的公开1B DPO检查点；\textbf{D2R}\cite{zeng2025d2r}通过IRL原理从专家示例中推断潜在奖励函数并迭代优化策略，是与本文方法最相关的对比基线。
+\textbf{实验目的}：本实验用于可行性验证，考察RMSD约束机制对IRL训练稳定性的影响。实验设置两类基础基线和一组消融：\textbf{SFT}仅在示例数据上做行为克隆，不引入奖励信号，作为无奖励优化的性能下界；\textbf{RLHF/PPO}\cite{ouyang2022training}以固定奖励模型提供静态奖励信号，用于对照固定奖励与动态IRL奖励；\textbf{PIRO（去除 $C\epsilon$）}移除RMSD约束项，检验相邻奖励函数变化约束在多轮IRL训练中的作用。
 
-\textbf{评测指标}：以Pythia-6.9B评估奖励模型对策略生成摘要的平均打分作为唯一量化指标，该模型独立于训练过程，与人类偏好评判具有较高相关性\cite{gao2023scaling}。
+\textbf{评测指标}：以Pythia-6.9B评估奖励模型对策略生成摘要的平均打分为量化指标。该模型独立于训练过程，与人类偏好评判具有较高相关性\cite{gao2023scaling}。
 
-超参数配置详见附录~\ref{sec:hyperparams_appendix}。
+表~\ref{tab:hyperparams_tldr}汇总TL;DR实验中参与训练流程的主要配置。
+
+\begin{table}[htbp]
+    \centering
+    \caption{TL;DR实验主要参数配置}
+    \label{tab:hyperparams_tldr}
+    \footnotesize
+    \renewcommand{\arraystretch}{1.08}
+    \setlength{\tabcolsep}{6pt}
+    \begin{tabular*}{0.98\textwidth}{@{\extracolsep{\fill}}lll@{}}
+        \toprule
+        \textbf{参数} & \textbf{取值} & \textbf{说明} \\
+        \midrule
+        SFT学习率 & $3\times10^{-6}$ & Step1监督初始化 \\
+        SFT批配置 & $4/8/8$ & 微批次/梯度累积/评估批大小 \\
+        \midrule
+        IRL迭代轮数 & 7 & iter1--iter7 \\
+        共用学习率 & $3\times10^{-6}$ & Step2策略与奖励更新 \\
+        Step2批配置 & $64/8/8/4$ & rollout前向/微批次/梯度累积/评估批大小 \\
+        PPO总episodes & 100000 & 策略优化阶段 \\
+        PPO保存频率 & 40 steps & 策略checkpoint保存间隔 \\
+        PPO优化轮数 & 4 & \texttt{noptepochs} \\
+        PPO截断系数 $\epsilon$ & 0.2 & \texttt{cliprange} \\
+        值函数截断系数 & 0.2 & \texttt{cliprange\_value} \\
+        值函数损失系数 $c_1$ & 0.1 & \texttt{vf\_coef} \\
+        GAE参数 $\lambda$ & 0.95 & 优势估计参数 \\
+        折扣因子 & 1.0 & 序列级奖励设定 \\
+        KL惩罚系数 $\beta$ & 0.05 & \texttt{kl\_coef} \\
+        最大响应长度 & 53 tokens & TL;DR标准设置 \\
+        生成温度 & 0.7 & 生成阶段采样参数 \\
+        非EOS惩罚 & $-1$ & 未正常终止时施加 \\
+        \midrule
+        合成样本筛选数 & 20000 & 奖励更新样本筛选上限 \\
+        奖励更新轮数 & 1 & \texttt{num\_train\_epochs} \\
+        奖励保存频率 & 60 steps & 奖励checkpoint保存间隔 \\
+        初始约束系数 $\eta_0$ & 0.1 & \texttt{c\_coef} / \texttt{c\_initial} \\
+        约束系数范围 & $[10^{-3},10.0]$ & 自适应调节截断范围 \\
+        RMSD目标阈值 $\tau$ & 1.5 & 奖励变化目标尺度 \\
+        阈值系数 $\gamma,\delta$ & $0.8,1.2$ & 下阈值与上阈值系数 \\
+        调节因子 $\alpha,\alpha'$ & $0.9,1.1$ & 约束系数衰减/增长因子 \\
+        \bottomrule
+    \end{tabular*}
+\end{table}
 
 \subsection{实验二：UltraFeedback通用指令跟随任务}
 
-UltraFeedback\cite{cui2023ultrafeedback}是由GPT-4对多种指令跟随任务进行评分构建的大规模AI偏好反馈数据集，覆盖写作、角色扮演、推理、数学、代码、信息抽取、STEM、人文等8个维度，广泛用于通用对齐能力的评测。本实验使用HuggingFace上的二值化版本（\texttt{HuggingFaceH4/ultrafeedback\_binarized}），专家示例数据集 $\mathcal{D}_E$ 由GPT-4o在UltraFeedback提示集上直接生成，策略底座为Qwen3.5-9B预训练模型。
+UltraFeedback\cite{cui2023ultrafeedback}由GPT-4对多种指令跟随任务进行评分构建，是大规模AI偏好反馈数据集，涵盖写作、角色扮演、推理、数学、代码、信息抽取、STEM、人文等8个维度，常用于通用对齐能力评测。本实验使用HuggingFace上的二值化版本（\texttt{HuggingFaceH4/ultrafeedback\_binarized}），专家示例数据集 $\mathcal{D}_E$ 由GPT-4o在UltraFeedback提示集上直接生成，策略底座为Qwen3.5-9B预训练模型。
 
-\textbf{对比基线}：\textbf{SFT}在GPT-4o示例上做监督微调；\textbf{DPO}\cite{rafailov2023direct}在UltraFeedback偏好对上离线训练；\textbf{IRL基线}（即D2R\cite{zeng2025d2r}）采用标准IRL框架从专家示例中推断奖励并以PPO优化策略；\textbf{IRL-GRPO}（本文方法）在IRL框架中以GRPO替代PPO作为内层策略优化算法，并引入RMSD自适应约束机制。
+\textbf{对比基线}：\textbf{SFT}在GPT-4o示例上做监督微调；\textbf{DPO}\cite{rafailov2023direct}在UltraFeedback偏好对上离线训练；\textbf{RLHF(PPO)}\cite{ouyang2022training}以固定奖励模型结合PPO进行在线优化；\textbf{RLHF(GRPO)}\cite{shao2024deepseekmath}以固定奖励模型结合GRPO进行在线优化；\textbf{IRL基线}（即D2R\cite{zeng2025d2r}）采用标准IRL框架从专家示例中推断奖励并以PPO优化策略；\textbf{PIRO}（本文方法）在IRL框架中以GRPO替代PPO作为内层策略优化算法，并引入RMSD自适应约束机制。
 
-\textbf{评测指标}：采用MT-Bench\cite{zheng2023judging}评测框架，对策略生成的单轮对话响应在8个维度分别由Opus~4.6、Sonnet~4.6、GPT-4o、GPT-5.4四个裁判模型独立打分（满分10分），取四模型平均值作为最终得分，记为MTBench评分。由于训练数据为单轮对话，本文仅报告Turn~1结果。
+\textbf{评测指标}：采用MT-Bench\cite{zheng2023judging}评测框架，对策略生成的单轮对话响应在8个维度分别由Opus~4.6、Sonnet~4.6、GPT-4o、GPT-5.4四个裁判模型独立打分（满分10分），取四模型平均值作为最终得分，记为MT-Bench评分。由于训练数据为单轮对话，本文仅报告Turn~1结果。
+
+表~\ref{tab:hyperparams_uf}汇总UltraFeedback实验中参与训练流程的主要配置。
+
+\begin{table}[htbp]
+    \centering
+    \caption{UltraFeedback实验主要参数配置}
+    \label{tab:hyperparams_uf}
+    \footnotesize
+    \renewcommand{\arraystretch}{1.08}
+    \setlength{\tabcolsep}{6pt}
+    \begin{tabular*}{0.98\textwidth}{@{\extracolsep{\fill}}lll@{}}
+        \toprule
+        \textbf{参数} & \textbf{取值} & \textbf{说明} \\
+        \midrule
+        训练轮数 & 4 & PIRO主循环轮数 \\
+        检查点间隔 & 31 & 每轮checkpoint间隔 \\
+        每轮rollout数 & 32 & 在线策略采样数量 \\
+        Bootstrap rollout数 & 32 & 初始奖励预热采样 \\
+        每提示采样数 & 4 & 同一提示下采样响应数 \\
+        GRPO组大小 & 4 & 组内相对优势估计 \\
+        参考策略 & r1=SFT，r2--r4=上一轮 & 策略参考更新方式 \\
+        \midrule
+        策略更新轮数 & 1 & 每rollout的PPO轮数 \\
+        每rollout优化步 & 32 & 策略优化步数 \\
+        批大小配置 & $32/256/1$ & 全局/rollout/微批次大小 \\
+        Critic与GAE & 关闭/不使用 & GRPO设置 \\
+        折扣因子 & 1.0 & 序列级奖励设定 \\
+        KL正则 & $\beta=0.05$，损失系数0.05 & 低方差KL损失 \\
+        PPO截断范围 & $0.2/0.28$ & 下界/上界截断系数 \\
+        Actor学习率 & $3\times10^{-6}$ & Adam优化器，常数学习率 \\
+        正则与梯度裁剪 & $0.01/0.5$ & 权重衰减/梯度裁剪阈值 \\
+        \midrule
+        最大响应长度 & 768 tokens & rollout生成上限 \\
+        rollout温度 & $0.4/0.7$ & 常规/Bootstrap采样温度 \\
+        生成惩罚 & $2.5/5.0/3.0$ & 截断/空响应/免责声明惩罚 \\
+        \midrule
+        SFT预热 & 10000样本，1轮 & 策略监督预热 \\
+        奖励BT预训练 & 8000样本，1轮 & 初始奖励偏好预热 \\
+        奖励更新配置 & 1轮，batch=4 & 每轮在线奖励更新 \\
+        奖励学习率 & $1\times10^{-6}$ & BT与在线奖励更新 \\
+        奖励统计窗口 & 150 & 近轮rollout窗口 \\
+        初始约束系数 $\eta_0$ & 0.5 & RMSD惩罚项初值 \\
+        约束系数范围 & $[0.05,5.0]$ & 自适应调节截断范围 \\
+        RMSD目标阈值 $\tau$ & 0.6 & 奖励变化目标尺度 \\
+        调节因子 $\alpha,\alpha'$ & $0.95,1.05$ & 约束系数衰减/增长 \\
+        \midrule
+        MT-Bench响应长度 & 1024 tokens & 评测生成上限 \\
+        MT-Bench裁判 & 4个模型 & 评测SFT与r1--r4策略 \\
+        \bottomrule
+    \end{tabular*}
+\end{table}
 
 \section{TL;DR摘要生成实验}
 
 \subsection{主实验结果}
 
-表~\ref{tab:tldr_main}报告了各方法在TL;DR摘要生成任务上的评测结果。
+表~\ref{tab:tldr_main}报告了各方法在TL;DR摘要生成任务上的评测结果，并加入去除 $C\epsilon$ 约束项的消融结果。
 
 \begin{table}[htbp]
     \centering
-    \caption{TL;DR摘要生成任务主实验结果}
+    \caption{TL;DR摘要生成任务主实验与消融结果}
     \label{tab:tldr_main}
     \small
     \renewcommand{\arraystretch}{1.3}
     \begin{tabular}{lc}
         \toprule
-        \textbf{方法} & \textbf{奖励评分（均值 $\pm$ 标准差）} \\
+        \textbf{方法} & \textbf{奖励评分（均值）} \\
         \midrule
-        SFT（基线）                          & $1.088$ \\
-        DPO\cite{rafailov2023direct}         & $1.340$ \\
-        RLHF/PPO\cite{ouyang2022training}    & $1.240$ \\
-        \textbf{CIRL-A（本文，iter4最优）}   & $\mathbf{1.415 \pm 0.054}$ \\
+        SFT（基线）                       & $1.088$ \\
+        RLHF/PPO\cite{ouyang2022training} & $1.240$ \\
+        PIRO（去除 $C\epsilon$，iter2最优） & $1.324$ \\
+        \textbf{PIRO（本文，iter5最优）}  & $\mathbf{1.415}$ \\
         \bottomrule
     \end{tabular}
 \end{table}
 
-CIRL-A（$1.415$）显著高于所有基线方法：相较于RLHF/PPO（$1.240$）提升约$14.1\%$，相较于DPO（$1.340$）提升约$5.6\%$，相较于SFT基线（$1.088$）提升约$30.0\%$。值得注意的是，DPO的评分高于RLHF/PPO，这与Pythia-1B规模下离线偏好优化在特定评估RM上的泛化特性有关，与已有研究结论一致\cite{tajwar2024preference}。CIRL-A的性能优势来源于IRL框架的动态奖励更新以及RMSD约束对奖励尺度膨胀的有效抑制，使策略在多轮迭代中稳定收敛而非陷入奖励黑客区域。
+PIRO（$1.415$）相较RLHF/PPO（$1.240$）提升约$14.1\%$，相较SFT基线（$1.088$）提升约$30.0\%$。去除 $C\epsilon$ 约束项后，方法在iter2取得最好结果$1.324$，仍高于固定奖励RLHF/PPO，但比完整PIRO低$0.091$分。这一对比说明动态IRL奖励能够带来一定收益，但若缺少对相邻奖励函数变化幅度的约束，后续迭代中的奖励漂移会削弱这种收益。PIRO在IRL框架内通过动态奖励更新使奖励模型适应策略分布，再用RMSD约束控制奖励更新幅度，从而降低多轮迭代中的奖励黑客风险。
 
 \subsection{训练动态分析}
 \label{sec:training_dynamics}
 
-CIRL-A的训练跨越7轮IRL迭代（iter0--6），每轮内含约390步PPO优化。图~\ref{fig:tldr_reward_curve}展示了4个随机种子在各迭代轮次final checkpoint处的奖励评分均值（实线）与标准差（阴影区域），并以虚线标注SFT、RLHF/PPO和DPO三条基线。表~\ref{tab:iter_reward}同时汇报对应数值，便于精确对比。
+PIRO的训练跨越7轮IRL迭代（iter1--7），每轮内含约390步PPO优化。图~\ref{fig:tldr_reward_curve}展示了完整PIRO与去除 $C\epsilon$ 约束项消融设置在各迭代轮次final checkpoint处的奖励评分均值（实线）与标准差（阴影区域），并以虚线标注SFT与RLHF/PPO两条基线。
 
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.88\textwidth]{figures/tldr_reward_curve.pdf}
-    \caption{CIRL-A在TL;DR任务上各IRL迭代轮次奖励评分收敛曲线（均值±标准差，4种子）}
+    \caption{PIRO及去除 $C\epsilon$ 消融设置在TL;DR任务上的奖励评分收敛曲线}
     \label{fig:tldr_reward_curve}
 \end{figure}
 
-\begin{table}[htbp]
-    \centering
-    \caption{CIRL-A各IRL迭代轮次奖励评分（TL;DR任务，4种子均值 $\pm$ 标准差）}
-    \label{tab:iter_reward}
-    \small
-    \renewcommand{\arraystretch}{1.2}
-    \begin{tabular}{cccccccc}
-        \toprule
-        & \textbf{iter0} & \textbf{iter1} & \textbf{iter2} & \textbf{iter3} & \textbf{iter4} & \textbf{iter5} & \textbf{iter6} \\
-        \midrule
-        均值 & 1.169 & 1.279 & 1.398 & 1.412 & \textbf{1.415} & 1.391 & 1.381 \\
-        标准差 & 0.103 & 0.065 & 0.078 & 0.086 & \textbf{0.054} & 0.046 & 0.047 \\
-        \bottomrule
-    \end{tabular}
-\end{table}
+由图~\ref{fig:tldr_reward_curve}可见，PIRO的奖励评分随IRL迭代单调提升：从iter1的$1.169$经三轮迭代收敛至iter4--5的$1.41$平台区域，iter5达到峰值$1.415$，iter6--7略有回落但趋于稳定。"快速上升—平台—微降"的曲线形态与第三章改进下界定理的预测一致：前期允许较大更新步长以快速逼近较优区域，进入平台区后约束自动收紧，避免过度优化导致性能退化。
 
-由表~\ref{tab:iter_reward}可见，CIRL-A的奖励评分随IRL迭代单调提升，从iter0的$1.169$经三轮迭代快速收敛至iter3--4的$1.41$平台区域，iter4达到峰值$1.415 \pm 0.054$，此后iter5--6轻微回落并趋于稳定。这一"快速上升—平台—微降"的三阶段收敛模式与第三章改进下界定理的理论预测相吻合：约束机制在前期允许较大更新步长以快速逼近最优，在平台区自动收紧约束以维持稳定，避免过度优化导致的性能崩溃。
+作为对照，去除 $C\epsilon$ 约束项的消融曲线在iter1和iter2分别达到$1.205$和$1.324$，高于完整PIRO同期的$1.169$和$1.279$。这一早期优势并不能说明约束项无效。奖励更新一旦不再受RMSD惩罚限制，专家样本与旧策略样本之间的奖励差异可以被更大幅度拉开，短期内为策略优化提供更强的更新信号，因此策略提升更快。问题在后续迭代中暴露：无约束奖励函数的尺度和相对排序持续漂移，固定旧策略构造的替代目标 $L_{\mathrm{old}}$ 与原始目标 $L$ 之间的偏差不断累积，策略逐渐追随被放大的局部奖励误差，过优化和奖励黑客倾向随之出现。消融设置在iter2后持续下降，至iter7降至$1.115$，已低于RLHF/PPO基线。这条曲线印证了第三章引入 $C\epsilon$ 误差控制项的必要性。
 
-在每轮IRL迭代内部，奖励评分随PPO步数（step0$\to$step390）同样呈现单调上升趋势，表明奖励函数与策略的交替优化在每轮内均能有效推进策略性能。以表现最佳的seed2026为例，iter3内奖励评分从step0的$1.509$平滑提升至step390的$1.522$，期间无明显振荡，训练稳定性良好。
+在每轮IRL迭代内部，奖励评分随PPO步数（step0$\to$step390）同样呈单调上升趋势，奖励函数与策略的交替优化在每轮内都能推进策略性能。以表现最佳的seed2026为例，iter4内奖励评分从step0的$1.509$平滑提升至step390的$1.522$，期间无明显振荡。
 
-4个随机种子的评分标准差随迭代推进逐步收窄：iter0标准差为$0.103$，iter4--6稳定在$0.046$--$0.054$之间，说明CIRL-A随训练深入产生了越来越稳定的收敛行为，约束机制有效抑制了不同随机轨迹间的发散，使训练行为更具可重复性。
+4个随机种子的评分标准差随迭代推进逐步收窄：iter1标准差为$0.103$，iter5--7稳定在$0.046$--$0.054$之间。约束机制压住了不同随机轨迹间的发散，训练行为也因此更可重复。
+
+
+
+
+
 
 \section{UltraFeedback通用指令跟随实验}
 
-\subsection{主实验结果}
+UltraFeedback实验考察PIRO在通用指令跟随任务上的整体表现。与TL;DR相比，该任务覆盖写作、角色扮演、推理、数学、代码、信息抽取、STEM和人文八个维度，能够同时反映平均性能、能力分布以及多轮训练稳定性。本节先比较不同方法在最佳检查点上的整体结果，再观察PIRO与IRL基线在各轮次中的轨迹变化，最后分析Math与Coding两个维度上未形成优势的原因。
 
-表~\ref{tab:uf_main}报告了各方法在UltraFeedback任务上的最佳checkpoint评测结果（按Avg(8)选择），表~\ref{tab:uf_detail}给出各方法全部迭代轮次的8维度明细。IRL基线的迭代轮次在表中记为r1--r3，与IRL-GRPO的轮次编号对齐。
+\subsection{综合性能与能力分布}
 
-\begin{table}[htbp]
+图~\ref{fig:uf_bar}给出各方法最佳检查点的Avg(8)平均得分。PIRO在最佳检查点上取得Avg(8)=$7.53$，高于SFT（$7.29$）、DPO（$7.33$）、RLHF(GRPO)（$7.35$）、RLHF(PPO)（$7.38$）和IRL基线（$7.46$）。相较最强基线IRL，PIRO的平均分提升为$0.07$；相较固定奖励RLHF(PPO)和RLHF(GRPO)，提升分别为$0.15$和$0.18$。在本实验设置下，RMSD自适应约束提高了动态IRL训练可达到的最佳综合平均分。
+
+\begin{figure}[H]
     \centering
-    \caption{UltraFeedback任务主实验结果（Turn~1，各方法最佳checkpoint，MTBench评分，满分10分）}
-    \label{tab:uf_main}
-    \small
-    \renewcommand{\arraystretch}{1.3}
-    \setlength{\tabcolsep}{4pt}
-    \begin{tabular}{llccccccccc}
-        \toprule
-        \textbf{方法} & \textbf{ckpt} & \textbf{Writing} & \textbf{Roleplay} & \textbf{Reasoning} & \textbf{Math} & \textbf{Coding} & \textbf{Extract} & \textbf{STEM} & \textbf{Human.} & \textbf{Avg(8)} \\
-        \midrule
-        SFT           & —  & 6.38 & 6.00 & 6.41 & \textbf{9.58} & 7.33 & 7.80 & 7.78 & 7.08 & 7.29 \\
-        DPO\cite{rafailov2023direct} & —  & 6.30 & 5.60 & 6.49 & 9.62 & \textbf{8.18} & \textbf{8.00} & 7.98 & 6.47 & 7.33 \\
-        IRL基线\cite{zeng2025d2r}    & r1 & \textbf{6.65} & 6.03 & 6.53 & 9.60 & 7.92 & 7.75 & 7.88 & \textbf{7.30} & 7.46 \\
-        \textbf{IRL-GRPO（本文）}    & r2 & 6.45 & \textbf{6.40} & \textbf{7.73} & 9.15 & 7.40 & 7.87 & \textbf{8.18} & 7.08 & \textbf{7.53} \\
-        \bottomrule
-    \end{tabular}
-\end{table}
+    \includegraphics[width=0.78\textwidth]{figures/uf_bar.pdf}
+    \caption{各方法在UltraFeedback任务上的MT-Bench Avg(8)评分对比（Turn~1，最佳检查点）}
+    \label{fig:uf_bar}
+\end{figure}
 
-\begin{table}[htbp]
+Avg(8)反映整体趋势，但不能保证八个维度都同步改善。UltraFeedback八个评价维度的任务性质不同，PIRO的提升来源需要结合维度分布判断。图~\ref{fig:uf_radar}给出六种方法在各维度上的能力画像；PIRO在Reasoning、Roleplay和STEM方向上的外扩较明显，Math、Coding和Writing则没有超过对应的最优方法。换言之，PIRO的平均分优势主要来自开放式指令跟随、推理表达和综合科学问答等维度，并非全维度全面领先。
+
+从方法对照关系看，PIRO的比较对象既包括固定奖励RLHF，也包括不带近端约束的IRL基线。在任务和训练配置基本一致的情况下，PIRO超过IRL基线，说明限制奖励函数变化幅度并不会削弱动态奖励学习的表达能力，还能够抑制后续策略更新中由奖励漂移引起的无效优化。因此，仅考察平均分不足以刻画方法差异，还需要结合优势分布和轮次变化判断约束是否稳定地改善了动态奖励学习。
+
+PIRO并非在所有指标上无条件占优。对于其他方法取得最优的维度，需要从任务反馈形式和训练信号来源解释其原因；Math与Coding这类具有外部正确性标准的任务，也需要与开放式指令跟随任务分开讨论。
+
+\begin{figure}[H]
     \centering
-    \caption{UltraFeedback任务全部checkpoint明细（Turn~1，MTBench评分）}
+    \includegraphics[width=0.82\textwidth]{figures/uf_radar.pdf}
+    \caption{六种模型在多维评价指标上的能力画像}
+    \label{fig:uf_radar}
+\end{figure}
+
+图~\ref{fig:uf_heatmap}从逐项得分角度呈现各方法的优势分布。PIRO的高分区域集中在Roleplay、Reasoning和STEM，DPO的高分区域在Math和Coding，GRPO在Writing上更高，IRL基线在Humanities上更高。各方法的高分区域并不重合，说明UltraFeedback中的平均分提升来自能力结构的重新分布；若只报告Avg(8)，会掩盖方法之间的具体差异。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figures/uf_heatmap.pdf}
+    \caption{六种模型在各评价指标上的热力矩阵对比}
+    \label{fig:uf_heatmap}
+\end{figure}
+
+为了区分"绝对得分高"和"接近该维度最优"两个问题，图~\ref{fig:uf_gap}以每个指标的最高得分为参照，其他方法用相对差距表示。PIRO在Roleplay、Reasoning和STEM三项上差距为$0$，Mean gap为$-0.26$，小于IRL的$-0.33$、PPO和GRPO的$-0.44$、DPO的$-0.46$以及SFT的$-0.49$。PIRO在Math、Coding和Writing上存在短板，但平均意义上的相对短板最小。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.92\textwidth]{figures/uf_gap.pdf}
+    \caption{六种模型相对于各指标最优结果的差距分析}
+    \label{fig:uf_gap}
+\end{figure}
+
+综合图~\ref{fig:uf_bar}到图~\ref{fig:uf_gap}可见，PIRO的优势并不依赖某个维度的孤立高分，而是在若干开放式或半开放式任务维度上同时缩小相对差距，从而提高最佳检查点的综合平均分。这与TL;DR实验的观察一致：RMSD约束主要改善动态奖励学习的稳定性，使策略在多轮更新中更容易保留可靠的奖励反馈。
+
+\subsection{多轮迭代稳定性分析}
+
+上一节比较的是各方法在最佳检查点上的横向结果，但PIRO的核心改动发生在多轮奖励—策略交替更新过程中。图~\ref{fig:uf_round_metrics}只保留IRL基线和PIRO前三轮的轨迹，灰色虚线标出各指标在所有方法和检查点中的最高得分。该图回答的不是横向排名，而是另一个问题：引入RMSD约束后，各维度得分在轮次推进中是否更加稳定。
+
+\begin{figure}[H]
+    \centering
+    \includegraphics[width=0.99\textwidth]{figures/uf_round_metrics.pdf}
+    \caption{PIRO与IRL基线在UltraFeedback八个评价指标上的轮次变化}
+    \label{fig:uf_round_metrics}
+\end{figure}
+
+图~\ref{fig:uf_round_metrics}显示，PIRO在Roleplay、Reasoning和STEM上第二轮达到或接近最高水平，Extraction则在第三轮继续上升；相比之下，IRL基线在Reasoning、Coding和Humanities上随轮次推进明显下滑。差异说明标准IRL奖励在多轮更新中更容易随策略分布变化发生偏移，部分维度的奖励信号会逐渐偏离有效方向；PIRO限制了相邻轮次奖励函数的变化幅度，从而在若干维度上抑制了这种漂移。
+
+需要注意的是，PIRO的轮次曲线在某些指标上并非单调上升。Reasoning第二轮达到最高后第三轮回落，STEM也在第二轮达峰后略降。动态奖励学习仍需要进行检查点选择；RMSD约束并不保证每一轮都优于上一轮，其作用是降低无约束奖励漂移带来的大幅退化风险。这一点与第三章的理论分析相对应：PIRO使替代目标的局部改进更容易转化为原始目标上的稳定收益。
+
+\subsection{Math与Coding维度差异分析}
+
+PIRO在Math和Coding上的得分低于DPO和部分RLHF基线，这与两类任务的评价信号特征直接相关。Math任务一般有明确的最终答案，Coding任务可以通过单元测试、编译检查或执行结果来验证正确性，结果奖励（outcome reward）和程序化验证器（verifier）更适合作为训练信号。PIRO在本文实验中依靠专家示例和当前策略样本的奖励对比更新奖励函数，关注的是响应整体质量和专家分布一致性，并未显式引入数学答案校验或代码执行反馈。
+
+在缺少专门验证器的情况下，奖励函数更容易捕捉语言流畅性、推理格式、答案完整性等表层或语义特征，而难以稳定区分数值答案是否精确、代码是否能通过边界测试。对于Roleplay、Reasoning、Extraction和STEM等维度，整体质量信号能够提供有效约束；但对于Math和Coding，最终正确性常常由少量关键步骤决定，局部错误会直接导致结果无效。单纯依赖示例驱动的标量奖励，难以替代可验证任务中的结果级反馈。
+
+此外，RMSD约束限制的是相邻轮次奖励函数变化幅度，目的在于避免奖励尺度漂移和过优化。其代价是奖励函数对少数高区分度错误模式的修正幅度也可能被压低。Math和Coding任务对错误样本的惩罚一般需要更尖锐的奖励边界，PIRO的近端约束偏向平滑更新，因此在这两类任务上相对DPO和固定奖励RLHF没有形成优势。
+
+由此可见，PIRO更适合通过动态奖励学习提升开放式指令跟随和综合表达能力。对于Math和Coding这类强可验证任务，后续可以将PIRO的RMSD约束机制与结果奖励或验证器反馈结合，在保持奖励更新稳定性的同时补充精确正确性信号。表~\ref{tab:uf_detail}汇总UltraFeedback实验的完整数值结果，其中B-r1至B-r3表示IRL基线的不同轮次，P-r1至P-r3表示PIRO的不同轮次。
+
+\begin{table}[H]
+    \centering
+    \caption{UltraFeedback各方法 MT-Bench评分明细（Turn~1；B=IRL基线，P=PIRO）}
     \label{tab:uf_detail}
-    \small
-    \renewcommand{\arraystretch}{1.3}
+    \scriptsize
+    \renewcommand{\arraystretch}{1.12}
     \setlength{\tabcolsep}{4pt}
-    \begin{tabular}{lccccccc}
+    \begin{tabular}{lcccccccccc}
         \toprule
-        \textbf{Metric} & \textbf{SFT} & \textbf{DPO} & \textbf{IRL-base r1} & \textbf{IRL-base r2} & \textbf{IRL-base r3} & \textbf{IRL-GRPO r1} & \textbf{IRL-GRPO r2} & \textbf{IRL-GRPO r3} \\
+        \textbf{Metric} & \textbf{SFT} & \textbf{DPO} & \textbf{PPO} & \textbf{GRPO} & \textbf{B-r1} & \textbf{B-r2} & \textbf{B-r3} & \textbf{P-r1} & \textbf{P-r2} & \textbf{P-r3} \\
         \midrule
-        Writing     & 6.38 & 6.30 & \textbf{6.65} & 6.58 & 6.60 & 6.22 & 6.45 & 6.50 \\
-        Roleplay    & 6.00 & 5.60 & 6.03 & 5.85 & 5.97 & 5.95 & \textbf{6.40} & 6.33 \\
-        Reasoning   & 6.41 & 6.49 & 6.53 & 6.48 & 6.21 & 7.05 & \textbf{7.73} & 6.85 \\
-        Math        & 9.58 & \textbf{9.62} & 9.60 & 9.12 & 9.50 & 9.18 & 9.15 & 9.25 \\
-        Coding      & 7.33 & \textbf{8.18} & 7.92 & 7.48 & 7.20 & 7.58 & 7.40 & 7.66 \\
-        Extraction  & 7.80 & 8.00 & 7.75 & 7.75 & 7.82 & 7.98 & 7.87 & \textbf{8.18} \\
-        STEM        & 7.78 & 7.98 & 7.88 & 7.82 & 7.85 & 7.95 & \textbf{8.18} & 7.97 \\
-        Humanities  & 7.08 & 6.47 & \textbf{7.30} & 6.97 & 6.70 & 6.72 & 7.08 & 6.90 \\
+        Writing    & 6.38 & 6.30 & 6.85 & \textbf{6.90} & 6.65 & 6.58 & 6.60 & 6.22 & 6.45 & 6.50 \\
+        Roleplay   & 6.00 & 5.60 & 6.20 & 5.97 & 6.03 & 5.85 & 5.97 & 5.95 & \textbf{6.40} & 6.33 \\
+        Reasoning  & 6.41 & 6.49 & 6.49 & 7.05 & 6.53 & 6.48 & 6.21 & 7.05 & \textbf{7.73} & 6.85 \\
+        Math       & 9.58 & \textbf{9.62} & 9.60 & 9.15 & 9.60 & 9.12 & 9.50 & 9.18 & 9.15 & 9.25 \\
+        Coding     & 7.33 & \textbf{8.18} & 7.47 & 7.47 & 7.92 & 7.48 & 7.20 & 7.58 & 7.40 & 7.66 \\
+        Extraction & 7.80 & 8.00 & 7.82 & 7.83 & 7.75 & 7.75 & 7.82 & 7.98 & 7.87 & \textbf{8.18} \\
+        STEM       & 7.78 & 7.98 & 7.70 & 7.78 & 7.88 & 7.82 & 7.85 & 7.95 & \textbf{8.18} & 7.97 \\
+        Humanities & 7.08 & 6.47 & 6.62 & 6.62 & \textbf{7.30} & 6.97 & 6.70 & 6.72 & 7.08 & 6.90 \\
         \midrule
-        Avg(8)      & 7.29 & 7.33 & 7.46 & 7.26 & 7.27 & 7.33 & \textbf{7.53} & 7.46 \\
+        Avg(8)     & 7.29 & 7.33 & 7.38 & 7.35 & 7.46 & 7.26 & 7.27 & 7.33 & \textbf{7.53} & 7.46 \\
         \bottomrule
     \end{tabular}
 \end{table}
-
-\subsection{结果分析}
-
-从主表（表~\ref{tab:uf_main}）可见，IRL-GRPO（本文方法）在最佳checkpoint（r2）上以Avg(8)=$7.53$超越所有基线，相较IRL基线最佳（$7.46$）提升$0.07$分，相较DPO（$7.33$）提升$0.20$分，相较SFT（$7.29$）提升$0.24$分。
-
-从维度分布来看，IRL-GRPO的提升集中于\textbf{推理}（$+1.20$，相较SFT）与\textbf{STEM}（$+0.40$）两个需要深层逻辑推导的维度，Roleplay亦略有提升；而在Math和Coding维度上低于DPO，这与GRPO在语言生成任务上倾向于探索多样性、而在格式严格的代码和数学题上稳定性略弱的特点一致。值得注意的是，IRL基线（D2R）在Writing和Humanities维度上表现最优，说明原始IRL框架在风格化生成上具有一定优势，而IRL-GRPO在这两个维度略有让步以换取推理和STEM的显著增益。
-
-从全部checkpoint明细（表~\ref{tab:uf_detail}）来看，IRL-GRPO在r1至r2间Avg(8)从$7.33$跃升至$7.53$，r3回落至$7.46$，呈现与TL;DR实验一致的"上升—峰值—微降"收敛模式，印证了RMSD约束在多轮IRL迭代中对奖励尺度膨胀的抑制效果在不同模型规模和任务类型上具有普遍性。IRL基线则在r2出现明显下滑（$7.26$），至r3才部分恢复（$7.27$），说明无约束的IRL迭代在第二轮存在不稳定性，与本文理论分析相吻合。
 
 \section{本章小结}
 
-本章在两个任务上对所提方法进行了系统评测。在TL;DR摘要生成任务上，以Pythia-1B为策略底座，CIRL-A在iter4达到峰值奖励评分$1.415 \pm 0.054$，相较RLHF/PPO提升约$14.1\%$，训练动态表现出"快速上升—平台—微降"的三阶段收敛模式，4个随机种子的标准差随迭代从$0.103$收窄至$0.054$，验证了RMSD约束对训练稳定性的关键作用。在UltraFeedback通用指令跟随任务上，以Qwen3.5-9B为底座，IRL-GRPO（r2）以MTBench Avg(8)=$7.53$超越SFT（$7.29$）、DPO（$7.33$）与IRL基线（$7.46$），在推理和STEM维度取得显著增益，且同样呈现稳定的迭代收敛行为。两组实验从不同模型规模和任务类型两个维度，共同印证了第三章改进下界定理关于约束必要性的理论论断，并验证了所提方法的有效性与跨任务泛化能力。
+本章在TL;DR摘要生成和UltraFeedback通用指令跟随两个任务上评测PIRO。TL;DR以Pythia-1B为策略底座，重点检验RMSD约束对IRL迭代稳定性的影响；UltraFeedback以Qwen3.5-9B为底座，考察PIRO在八个评价维度上的综合表现。两组实验均区分固定奖励优化、无约束动态奖励学习和带约束动态奖励学习，使实验结果能够直接对应第三章关于奖励更新幅度的理论分析。
+
+在TL;DR可行性实验中，PIRO在iter5取得峰值奖励评分$1.415$，相较固定奖励RLHF/PPO提升约$14.1\%$，相较SFT提升约$30.0\%$。去除 $C\epsilon$ 约束项后，消融设置在iter2取得$1.324$，之后持续退化，至iter7降为$1.115$。结果表明，无约束奖励更新早期可能提供更强的优化信号，但后续会引起奖励尺度和排序关系漂移；RMSD约束能够抑制这种漂移，使动态IRL训练的收益曲线保持稳定。
+
+在UltraFeedback实验中，PIRO（r2）以MT-Bench Avg(8)=$7.53$超过SFT（$7.29$）、DPO（$7.33$）、RLHF(GRPO)（$7.35$）、RLHF(PPO)（$7.38$）和IRL基线（$7.46$）。单项指标上，PIRO在Roleplay、Reasoning、Extraction和STEM上取得过最高分，优势集中在开放式指令跟随、推理表达、信息抽取和综合科学问答等方向；Writing、Math、Coding和Humanities的最优值仍由其他方法取得。换言之，PIRO提升的是最佳检查点的综合平均分和若干关键维度，并非所有指标同步提高。
+
+两组实验共同支持第三章改进下界定理的核心判断：在奖励—策略交替优化中，仅优化当前替代目标不足以保证原始目标持续改善，还需要控制相邻轮次奖励函数的变化幅度。PIRO用RMSD反馈和自适应约束系数将这一要求转化为具体训练机制，使奖励函数能够随策略分布变化而更新，同时避免无约束漂移。
+
+实验也勾勒出PIRO的适用边界。对于摘要生成、角色扮演、推理表达、信息抽取、STEM问答这类开放式或半开放式任务，整体质量奖励能较好反映偏好差异，PIRO的动态奖励约束有发挥空间；Math和Coding这类强可验证任务，最终正确性往往依赖精确答案、可执行代码、边界测试，单一标量奖励难以完全替代结果级验证。后续可在PIRO框架内接入数学验证器、代码执行反馈或多粒度偏好标注，以补充更精确的结果级正确性信号。
+
+综上，可行性实验和通用指令跟随实验共同验证了本文方法的核心假设：奖励函数需要在策略分布变化时同步更新，但奖励更新必须接受可观测、可调节的约束。PIRO用RMSD约束在适应性与稳定性之间取得折中，也为后续在更大规模模型上开展动态奖励学习提供了实验依据。
