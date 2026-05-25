@@ -7,9 +7,9 @@
 
 大语言模型（Large Language Models, LLMs）改变了人类获取知识与完成任务的方式。从2018年BERT\cite{devlin2018bert}和GPT\cite{radford2018improving}开始，大语言模型的参数规模从数亿增长到数千亿。近年来，以GPT-5.5\cite{openai2026gpt55}、Gemini 3.1 Pro\cite{geminiteam2026gemini31}、Claude Opus 4.7\cite{anthropic2026claudeopus47}为代表的国际前沿模型，以及DeepSeek-V4\cite{deepseekai2026deepseekv4}、Qwen3.6系列\cite{qwenteam2026qwen36}等国产大模型，在数学推理、代码生成、多语言理解等任务上表现出较强能力，应用范围仍在扩展。这些模型已经从学术研究走向商业部署，在教育、医疗、法律、科研等领域投入使用。
 
-模型能力越强、部署面越广，预训练目标和人类真实期望之间的差距越突出。大语言模型预训练仍主要靠最大化下一词预测概率更新参数，这一目标本身并不保证输出贴合人类需求。未经对齐的模型容易产生事实性幻觉（hallucination）\cite{ji2023survey}、有害内容及偏见性输出，在高风险场景下后果会更严重。仅靠扩规模、提通用能力难以支撑可信部署；如何让模型输出在价值观、事实准确性与安全性上与人类期望一致，是大语言模型研究中的关键问题，即人工智能对齐问题\cite{gabriel2020artificial}。
+模型能力越强、部署面越广，预训练目标和人类真实期望之间的差距越突出。大语言模型预训练仍主要靠最大化下一词预测概率更新参数，这一目标本身并不保证输出贴合人类需求。未经对齐的模型容易产生事实性幻觉（hallucination）\cite{ji2023survey}、有害内容及偏见性输出，在高风险场景下后果会更严重。仅靠扩规模、提通用能力难以支撑可信部署；如何让模型输出在价值观、事实准确性与安全性上与人类期望一致，是大语言模型研究中的关键问题，即大模型中的对齐问题\cite{gabriel2020artificial}。
 
-应对该问题的主要做法是在后训练（post-training）阶段做奖励驱动优化：以人类或AI生成的反馈信号为监督，训练奖励模型（reward model）给大语言模型的输出打分，再用奖励信号引导策略模型（policy model）更新，让输出更贴近人类期望。奖励信号的准确性与稳定性直接决定对齐效果。奖励模型若能较好地刻画人类偏好，策略优化就有明确方向；反之，奖励信号有偏差或不稳定会让策略往错误方向演化，对齐目标也难以达成。
+应对该问题的主要做法是在后训练（post-training）阶段做语义对齐：以人类或AI生成的反馈信号为监督，训练奖励模型（reward model）给大语言模型的输出打分，再用奖励信号引导策略模型（policy model）更新，让输出更贴近人类期望。奖励信号的准确性与稳定性直接决定对齐效果。奖励模型若能较好地刻画人类偏好，策略优化就有明确方向；反之，奖励信号有偏差或不稳定会让策略往错误方向演化，对齐目标也难以达成。
 
 当前主流的基于人类反馈的强化学习（Reinforcement Learning from Human Feedback, RLHF）方法\cite{ouyang2022training,ziegler2019fine}多采用"两阶段解耦"范式：第一阶段在人类偏好数据上训练固定的奖励模型，第二阶段利用该冻结奖励模型，通过近端策略优化（Proximal Policy Optimization, PPO）\cite{schulman2017proximal}或群体相对策略优化（Group Relative Policy Optimization, GRPO）\cite{shao2024deepseekmath}等算法更新策略。这一范式存在结构性局限：策略反复迭代后，生成分布会逐渐偏离奖励模型的训练分布，产生分布偏移（distribution shift）。分布偏移下，奖励模型对训练分布外的样本只能做外推评估，评分可靠性会随策略偏离程度增大而下降。策略优化直接面向奖励模型给出的代理分数，而非人类真实偏好本身。优化压力越大，策略越容易利用奖励模型的偏差或漏洞，生成高奖励分数却低真实质量的样本。这种训练动态通常称为奖励模型过优化（reward model overoptimization）\cite{gao2023scaling}，机制上也可以看作RLHF场景下奖励黑客（reward hacking）问题的一种具体表现。
 
