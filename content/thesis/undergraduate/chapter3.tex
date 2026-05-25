@@ -3,9 +3,9 @@
 \chapter{基于受约束逆强化学习的对齐方法}
 \chaptermark{基于受约束逆强化学习的对齐方法}
 
-第一章已经指出，固定奖励模型会随着策略分布变化而逐渐失效。若在奖励-策略联合更新的逆强化学习框架下完全放开奖励模型更新，又会带来新的不稳定性：奖励函数变化过大时，策略优化会追逐不断漂移的奖励信号，导致奖励尺度膨胀或过优化。本章关注的问题是：在逆强化学习框架下，如何让奖励模型跟随策略分布持续更新，同时不让每一轮奖励更新幅度过大。本章先建立奖励学习与策略优化耦合的双层问题，再推导奖励函数诱导出的最优策略及原始目标。在此基础上构造固定旧策略的局部替代目标，证明其在展开点处与原始目标具有相同的一阶信息；给出带误差项的改进下界，刻画有限步更新后替代目标相对于原始目标的偏差；最后将这一约束思想转化为可计算的RMSD反馈机制，并给出完整训练流程。
+前两章已经说明，固定奖励函数难以适应策略分布变化，而无约束的动态奖励学习又可能引起奖励尺度膨胀和语义漂移。本章围绕这一矛盾，提出受约束逆强化学习对齐方法PIRO。方法核心是在奖励--策略交替更新过程中引入相邻轮次奖励变化约束，使奖励函数能够随策略分布更新，同时保持局部稳定。
 
-从全文主题看，本章是“基于逆强化学习的大模型偏好对齐方法”的核心推导部分。这里的IRL不是一般意义上的模仿学习工具，而是用于刻画偏好目标的奖励反演过程：专家响应代表偏好行为，奖励函数表示待学习的偏好目标，策略优化则把该目标转化为语言模型的生成行为。PIRO的设计正是在这三个对象之间加入近端约束，使偏好奖励能够随策略更新而调整，同时保持跨轮变化可控。
+本章先建立奖励学习与策略优化耦合的双层问题，再推导奖励函数诱导出的最优策略及原始目标。在此基础上构造固定旧策略的局部替代目标，证明其在展开点处与原始目标具有相同的一阶信息；给出带误差项的改进下界，刻画有限步更新后替代目标相对于原始目标的偏差；最后将这一约束思想转化为可计算的RMSD反馈机制，并给出完整训练流程。
 
 \begin{figure}[H]
     \centering
@@ -20,7 +20,7 @@
 
 \subsection{符号定义}
 
-设 $\mathcal{X}$ 为提示空间，$\mathcal{Y}$ 为完整响应空间，$\rho$ 为提示分布。本文将大语言模型生成视为序列级单步决策过程：给定提示 $x$ 后，完整回答 $y$ 视为一次动作，因此动作价值函数 $Q(x,y)$ 可直接写成奖励 $r_\theta(x,y)$。$\pi_{\mathrm{E}}$ 表示专家响应分布，$\pi_{\mathrm{ref}}$ 表示参考策略，$\pi_\theta$ 表示由奖励函数 $r_\theta$ 诱导出的最优策略，$\beta>0$ 为KL正则系数。
+设 $\mathcal{X}$ 为提示空间，$\mathcal{Y}$ 为完整响应空间，$\rho$ 为提示分布。本文将大语言模型生成视为序列级单步决策过程：给定提示 $x$ 后，完整回答 $y$ 视为一次动作，因此动作价值函数 $Q(x,y)$ 可直接写成奖励 $r_\theta(x,y)$。$\pi_{\mathrm{E}}$ 表示专家响应分布，$\pi_{\mathrm{ref}}$ 表示参考策略，$\pi_\theta$ 表示由奖励函数 $r_\theta$ 诱导出的理论最优策略，$\pi_\phi$ 表示实际训练中的参数化策略，$\beta>0$ 为KL正则系数。
 
 \subsection{原始双层问题}
 
@@ -32,14 +32,17 @@
     \left[\log \pi_\theta(y|x)\right],\\
     \mathrm{s.t.}\quad
     \pi_\theta
-    &:=\arg\max_\pi\ \mathbb{E}_{x\sim\rho,\,y\sim\pi(\cdot|x)}
-    \left[r_\theta(x,y)-\beta D_{\mathrm{KL}}\!\left(\pi(\cdot|x)\|\pi_{\mathrm{ref}}(\cdot|x)\right)\right].
+    &:=\arg\max_\pi\ \mathbb{E}_{x\sim\rho}
+    \left[
+    \mathbb{E}_{y\sim\pi(\cdot|x)} r_\theta(x,y)
+    -\beta D_{\mathrm{KL}}\!\left(\pi(\cdot|x)\|\pi_{\mathrm{ref}}(\cdot|x)\right)
+    \right].
     \label{eq:original_ch3}
 \end{aligned}
 \end{equation}
 其中，外层目标用于学习奖励函数：通过调整奖励参数 $\theta$，让该奖励函数诱导出的策略 $\pi_\theta$ 倾向于生成专家响应；内层目标在给定奖励函数下优化策略，并通过KL正则限制新策略相对于参考策略的偏离。
 
-该双层形式把大模型偏好对齐中的三个核心对象放在同一框架内：专家分布 $\pi_{\mathrm{E}}$ 提供偏好目标，奖励函数 $r_\theta$ 是该偏好目标的可学习表示，诱导策略 $\pi_\theta$ 则给出模型行为。后续推导围绕奖励函数展开，但最终目的始终是改善由奖励诱导出的策略分布，而不是单独提高奖励模型本身的数值。
+该双层形式把大模型偏好对齐中的三个核心对象放在同一框架内：专家分布 $\pi_{\mathrm{E}}$ 提供偏好目标，奖励函数 $r_\theta$ 是该偏好目标的可学习表示，诱导策略 $\pi_\theta$ 则给出模型行为。后续推导围绕奖励函数展开，但最终目的始终是改善由奖励诱导出的策略分布，而不是单独提高奖励函数本身的数值。
 
 \section{最优策略的闭式推导}
 
@@ -115,7 +118,9 @@
     \left[D_{\mathrm{KL}}\!\left(\pi_{\mathrm{E}}(\cdot|x)\|\pi_{\mathrm{ref}}(\cdot|x)\right)\right]\\
     &\quad-
     \mathbb{E}_{x\sim\rho,\,y\sim\pi_\theta(\cdot|x)}
-    \left[r_\theta(x,y)-\beta D_{\mathrm{KL}}\!\left(\pi_\theta(\cdot|x)\|\pi_{\mathrm{ref}}(\cdot|x)\right)\right].
+    \left[r_\theta(x,y)\right]
+    +\beta\mathbb{E}_{x\sim\rho}
+    \left[D_{\mathrm{KL}}\!\left(\pi_\theta(\cdot|x)\|\pi_{\mathrm{ref}}(\cdot|x)\right)\right].
     \label{eq:l_from_ell_ch3}
 \end{aligned}
 \end{equation}
@@ -136,7 +141,7 @@
     L(\theta)=J(\pi_{\mathrm{E}},r_\theta)-J(\pi_\theta,r_\theta).
     \label{eq:l_objective_ch3}
 \end{equation}
-式~\eqref{eq:l_objective_ch3}是后续PIRO推导的起点。第一项刻画专家偏好响应在当前奖励下的正则化价值，第二项刻画该奖励诱导出的策略自身可达到的软最优值；二者之差反映奖励函数能否使专家行为在诱导策略分布中获得更高解释概率。由此，偏好对齐问题被具体化为受约束的奖励函数学习问题。
+式~\eqref{eq:l_objective_ch3}是后续PIRO推导的起点。第一项刻画专家偏好响应在当前奖励下的正则化价值，第二项刻画该奖励诱导出的策略自身可达到的软最优值。由于 $\pi_\theta$ 是给定奖励函数下的最优策略，通常有 $J(\pi_\theta,r_\theta)\ge J(\pi_{\mathrm{E}},r_\theta)$，因此 $L(\theta)$ 往往不大于零。最大化 $L(\theta)$ 的含义不是让专家项超过最优策略项，而是缩小专家行为与奖励诱导行为之间的软价值差距，使学习到的奖励函数能够更好解释专家响应。由此，偏好对齐问题被具体化为受约束的奖励函数学习问题。
 
 \section{替代目标的构造与一阶等价性}
 
@@ -253,13 +258,14 @@ $L_{\mathrm{old}}$ 固定了原始目标中随 $\theta$ 改变的诱导策略项
 
 \subsection{定理陈述}
 
-定义相邻两轮奖励函数的最大逐点变化为
+\noindent\textbf{定理3.1（替代目标误差界）}
+假设：（1）响应空间 $\mathcal{Y}$ 在给定最大生成长度下有限；（2）参考策略满足 $\pi_{\mathrm{ref}}(y|x)>0$，专家分布、旧策略与新策略的支持均包含于参考策略支持内；（3）两轮奖励函数有界，即对任意 $(x,y)$ 有 $|r_{\theta_{\mathrm{old}}}(x,y)|\le R$、$|r_{\theta_{\mathrm{new}}}(x,y)|\le R$；（4）相邻奖励函数的最大逐点变化为
 \begin{equation}
     \epsilon=
     \max_{x,y}\left|r_{\theta_{\mathrm{new}}}(x,y)-r_{\theta_{\mathrm{old}}}(x,y)\right|.
     \label{eq:epsilon_def}
 \end{equation}
-若 $|\mathcal{Y}|<\infty$，且对任意 $(x,y)$ 有 $|r_{\theta_{\mathrm{new}}}(x,y)|\le R$、$|r_{\theta_{\mathrm{old}}}(x,y)|\le R$，则有如下下界：
+则有如下误差界：
 \begin{equation}
 \begin{gathered}
     L(\theta_{\mathrm{new}})
@@ -269,7 +275,7 @@ $L_{\mathrm{old}}$ 固定了原始目标中随 $\theta$ 改变的诱导策略项
     \label{eq:lower_bound}
 \end{gathered}
 \end{equation}
-该定理说明，替代目标相对于原始目标的高估误差可由奖励函数变化幅度 $\epsilon$ 控制；当 $\epsilon$ 过大时，误差项 $C\epsilon$ 会抵消替代目标带来的改进。
+该定理说明，替代目标相对于原始目标的高估误差可由奖励函数变化幅度 $\epsilon$ 控制；当 $\epsilon$ 过大时，误差项 $C\epsilon$ 会抵消替代目标带来的改进。需要指出的是，在大语言模型中 $\mathcal{Y}$ 表示完整响应空间，规模极大，因此 $C=3R|\mathcal{Y}|/\beta$ 给出的常数通常较松。该下界主要用于说明奖励变化幅度与替代目标偏差之间的定性关系，而不是提供可直接用于大模型训练的紧常数。
 
 \subsection{策略全变差距离引理}
 
@@ -479,11 +485,11 @@ C\epsilon
 \begin{figure}[htbp]
     \centering
     \includegraphics[width=0.95\textwidth]{figures/648.PNG}
-    \caption{局部替代目标的下界与迭代优化示意}
+    \caption{局部替代目标及误差修正后的保守下界示意}
     \label{fig:lower_bound_intuition}
 \end{figure}
 
-图~\ref{fig:lower_bound_intuition}给出了上述理论结果的直观解释。蓝色曲线表示原始目标 $L(\theta)$，橙色曲线表示以不同旧参数 $\theta_i$ 为展开点构造的局部替代下界。绿色点表示当前展开点，替代目标在该点与原始目标具有相同的一阶信息；紫色点表示沿替代目标更新后的候选参数。每一轮替代目标只在局部可信，若奖励函数更新过大，橙色下界与蓝色原始目标之间的偏差会增大，替代目标上的改进难以稳定对应到原始目标。右侧小图表示新旧奖励函数在样本空间 $\mathcal{X}\times\mathcal{Y}$ 上的逐点差异，$\epsilon$ 是这一差异的最大值。控制 $\epsilon$ 的作用是限制每一轮局部下界的失真程度，让多轮交替优化沿原始目标上升方向稳定推进。
+图~\ref{fig:lower_bound_intuition}给出了上述理论结果的直观解释。蓝色曲线表示原始目标 $L(\theta)$，橙色曲线表示以不同旧参数 $\theta_i$ 为展开点构造的局部替代目标；扣除误差项 $C\epsilon$ 后，才得到相对于原始目标的保守下界。绿色点表示当前展开点，替代目标在该点与原始目标具有相同的一阶信息；紫色点表示沿替代目标更新后的候选参数。每一轮替代目标只在局部可信，若奖励函数更新过大，经误差修正后的保守下界会明显降低，替代目标上的改进难以稳定对应到原始目标。右侧小图表示新旧奖励函数在样本空间 $\mathcal{X}\times\mathcal{Y}$ 上的逐点差异，$\epsilon$ 是这一差异的最大值。控制 $\epsilon$ 的作用是限制每一轮局部替代目标的失真程度，让多轮交替优化更稳定。
 
 据此，本文方法可以概括为围绕上述示意关系展开的交替过程。第 $k$ 轮开始时，先由当前奖励参数得到对应策略快照 $\pi_{\mathrm{old}}$；接着固定该策略快照，用专家响应与旧策略响应的奖励差异构造替代目标 $L_{\mathrm{old}}(\theta)-C\epsilon$，奖励更新时同时限制 $r_\theta$ 相对于 $r_{\theta_{\mathrm{old}}}$ 的变化幅度，避免替代目标过度偏离原始目标；将更新后的奖励参数作为下一轮的旧参数，继续优化策略。上述分析中，3.3节说明代理目标在展开点处具有相同的一阶方向，3.4节说明离开展开点后的代理误差可由奖励变化幅度控制，二者共同支持“受约束奖励更新”的方法原则。
 
@@ -491,32 +497,48 @@ C\epsilon
 
 \subsection{引入近似约束的必要性}
 
-式~\eqref{eq:lower_bound}表明，替代目标与原始目标之间的偏差由误差项 $C\epsilon$ 控制。在实际训练中不能只最大化 $L_{\mathrm{old}}(\theta)$，还需限制相邻两轮奖励函数的变化幅度。然而，理论形式中的 $C$ 与 $\epsilon$ 都难以直接使用：$C$ 依赖完整响应空间大小 $|\mathcal{Y}|$，$\epsilon$ 需要在所有提示-响应对上取最大值。对于大语言模型，这两个量都无法直接计算。
+式~\eqref{eq:lower_bound}表明，替代目标与原始目标之间的偏差由误差项 $C\epsilon$ 控制。在实际训练中不能只最大化 $L_{\mathrm{old}}(\theta)$，还需限制相邻两轮奖励函数的变化幅度。然而，理论形式中的 $C$ 与 $\epsilon$ 都难以直接使用：$C$ 依赖完整响应空间大小 $|\mathcal{Y}|$，$\epsilon$ 需要在所有提示-响应对上取最大值。对于大语言模型，这两个量都无法直接计算；同时，前述常数界较松，更适合作为约束设计的理论动机，而不是直接作为训练超参数。
 
-为此，本文将理论约束转化为可计算的近似形式：用批次级统计量近似 $\epsilon$，用可调系数近似 $C$。这一步是从理论推导走向大模型训练算法的关键转换：PIRO并不要求枚举完整响应空间，而是在当前训练分布上观测奖励函数的跨轮变化，并据此调节奖励更新强度。
+为此，本文将理论约束转化为可计算的近似形式：用批次级统计量对应 $\epsilon$ 所描述的奖励变化强度，用可调系数对应理论误差项中的常数尺度。该转换不保留严格的全空间下界保证，而是把理论结论转化为训练中的稳定性正则：PIRO并不要求枚举完整响应空间，而是在当前训练分布上观测奖励函数的跨轮变化，并据此调节奖励更新强度。
 
 \subsection{\texorpdfstring{$\epsilon$}{epsilon} 的近似}
 
-为近似理论中的最大逐点变化 $\epsilon$，本文使用相邻两轮奖励模型在同一批次样本上的均方根差。给定批次 $\mathcal{B}=\{(x^{(i)},y^{(i)})\}_{i=1}^{B}$，定义
+为近似理论中的最大逐点变化 $\epsilon$，本文使用相邻两轮奖励函数在同一批次样本上的均方根差。给定批次 $\mathcal{B}=\{(x^{(i)},y^{(i)})\}_{i=1}^{B}$，奖励优化过程中使用的批次RMSD定义为
 \begin{equation}
-    \text{RMSD}_k = \sqrt{\frac{1}{B}\sum_{i=1}^{B}\left(r_{\theta_k}(x^{(i)}, y^{(i)}) - r_{\theta_{k-1}}(x^{(i)}, y^{(i)})\right)^2}
+    \mathrm{RMSD}(\theta;\theta_{\mathrm{old}},\mathcal{B})
+    =
+    \sqrt{
+    \frac{1}{B}\sum_{i=1}^{B}
+    \left(
+    r_\theta(x^{(i)},y^{(i)})
+    -
+    r_{\theta_{\mathrm{old}}}(x^{(i)},y^{(i)})
+    \right)^2
+    }.
+    \label{eq:rmsd_function}
+\end{equation}
+该量是当前奖励参数 $\theta$ 的函数，可作为奖励目标中的惩罚项参与反向传播。每轮奖励优化完成后，再用更新后的奖励参数计算轮次级统计量
+\begin{equation}
+    \mathrm{RMSD}_k
+    =
+    \mathrm{RMSD}(\theta_k;\theta_{k-1},\mathcal{B}_k),
     \label{eq:rmsd}
 \end{equation}
-其中 $\theta_k$ 和 $\theta_{k-1}$ 分别为第 $k$ 轮与第 $k-1$ 轮的奖励参数。RMSD不是全空间最大值 $\epsilon$ 的严格上界，而是训练批次上的可计算代理量，用于反映当前训练分布上的奖励变化强度。
+其中 $\theta_k$ 和 $\theta_{k-1}$ 分别为第 $k$ 轮与第 $k-1$ 轮的奖励参数，$\mathcal{B}_k$ 为本轮用于统计奖励变化的样本批次。RMSD不是全空间最大值 $\epsilon$ 的严格上界，而是训练批次上的可计算代理量，用于反映当前训练分布上的奖励变化强度。实现中也可使用 $\mathrm{RMSD}^2$ 或均方误差形式作为更平滑的惩罚项；本文采用RMSD，是为了让该统计量与奖励输出差异保持相同量纲。
 
 \subsection{\texorpdfstring{$C$}{C} 的自适应近似}
 
-理论常数 $C=3R|\mathcal{Y}|/\beta$ 无法在完整响应空间上直接计算。为在实现中保留 $C\epsilon$ 的约束作用，本文用可调系数 $\eta_k$ 近似 $C$，并根据RMSD反馈自适应更新 $\eta_k$。设 $\tau>0$ 为目标RMSD阈值，$\gamma\in(0,1)$ 为下阈值系数，$\delta>1$ 为上阈值系数，$\alpha\in(0,1)$ 为衰减因子，$\alpha'>1$ 为增长因子，调节规则为：
+理论常数 $C=3R|\mathcal{Y}|/\beta$ 无法在完整响应空间上直接计算。为在实现中保留“惩罚过大奖励变化”的作用，本文引入可调系数 $\eta_k$，并根据RMSD反馈自适应更新 $\eta_k$。设 $\tau>0$ 为目标RMSD阈值，$\gamma\in(0,1)$ 为下阈值系数，$\delta>1$ 为上阈值系数，$\alpha\in(0,1)$ 为衰减因子，$\alpha'>1$ 为增长因子，调节规则为：
 
 \begin{equation}
     \eta_{k+1} = \begin{cases}
-        \alpha' \cdot \eta_k & \text{若 } \text{RMSD}_k > \delta\tau \\
-        \alpha \cdot \eta_k & \text{若 } \text{RMSD}_k < \gamma\tau \\
+        \alpha' \cdot \eta_k & \text{若 } \mathrm{RMSD}_k > \delta\tau \\
+        \alpha \cdot \eta_k & \text{若 } \mathrm{RMSD}_k < \gamma\tau \\
         \eta_k & \text{其他}
     \end{cases}
     \label{eq:adaptive_eta}
 \end{equation}
-当RMSD大于上阈值 $\delta\tau$ 时，增大 $\eta_k$ 以加强对奖励变化的惩罚；当RMSD小于下阈值 $\gamma\tau$ 时，减小 $\eta_k$ 以放松约束。理论误差项 $C\epsilon$ 在实现中被近似为 $\eta_k\cdot\text{RMSD}_k$。
+当RMSD大于上阈值 $\delta\tau$ 时，增大 $\eta_k$ 以加强对奖励变化的惩罚；当RMSD小于下阈值 $\gamma\tau$ 时，减小 $\eta_k$ 以放松约束。因此，$\eta_k\cdot\mathrm{RMSD}(\theta;\theta_{\mathrm{old}},\mathcal{B})$ 并不构成对理论误差项 $C\epsilon$ 的严格替代，而是在当前训练分布上对奖励变化强度的可计算近似。本文将其作为受理论启发的稳定性正则项，用于在实际训练中抑制相邻轮次奖励函数的过大漂移。
 
 \section{完整训练流程}
 
@@ -532,31 +554,32 @@ C\epsilon
         \Require 专家数据集 $\mathcal{D}_E$，提示数据集 $\mathcal{D}$，参考策略 $\pi_{\mathrm{ref}}$，
                  初始奖励参数 $\theta_0$，初始策略参数 $\phi_0$，
                  迭代轮数 $K$，每轮内层步数 $T_\pi$，每轮外层步数 $T_r$，
-                 初始奖励学习率 $\lambda_0^r$，策略学习率 $\lambda^\pi$，初始约束系数 $\eta_0$，
+                 奖励学习率 $\lambda^r$，策略学习率 $\lambda^\pi$，初始约束系数 $\eta_0$，
                  RMSD目标阈值 $\tau$，下阈值系数 $\gamma$，上阈值系数 $\delta$，衰减因子 $\alpha$，增长因子 $\alpha'$
         \Ensure 对齐后的策略参数 $\phi$
-        \State $\theta \gets \theta_0,\ \phi \gets \phi_0,\ \lambda^r \gets \lambda_0^r,\ \eta \gets \eta_0$
+        \State $\theta \gets \theta_0,\ \phi \gets \phi_0,\ \eta \gets \eta_0$
         \For{$k = 1, 2, \ldots, K$}
             \State \textbf{// 内层：策略优化}
             \For{$t = 1, 2, \ldots, T_\pi$}
-                \State 从 $\mathcal{D}$ 采样批次提示 $\{x^{(i)}\}$，用当前策略 $\pi_{\phi}$ 采样响应 $\{y^{(i)}\}$
+                \State 从 $\mathcal{D}$ 采样批次提示 $\{x^{(i)}\}$，用当前策略 $\pi_\phi$ 采样响应 $\{y^{(i)}\}$
                 \State 计算策略优化目标：$\mathcal{J}_\pi = \mathbb{E}\left[r_\theta(x,y) - \beta\log\frac{\pi_\phi(y|x)}{\pi_{\mathrm{ref}}(y|x)}\right]$
-                \State 执行梯度上升：$\phi \gets \phi + \lambda^\pi \nabla_\phi \mathcal{J}_\pi$
+                \State 用PPO/GRPO等KL约束策略优化器近似最大化 $\mathcal{J}_\pi$，更新 $\phi$
             \EndFor
             \State \textbf{// 外层：奖励优化（含自适应约束）}
             \State 固定当前奖励参数与策略快照：$\theta_{\mathrm{old}} \gets \theta,\ \pi_{\mathrm{old}}\gets\pi_\phi$
             \For{$t = 1, 2, \ldots, T_r$}
                 \State 从 $\mathcal{D}_E$ 采样专家响应批次 $\{(x^{(i)}, y_E^{(i)})\}$
                 \State 从 $\mathcal{D}$ 采样提示，并用固定策略 $\pi_{\mathrm{old}}$ 采样响应批次 $\{(x^{(j)}, y_{\mathrm{old}}^{(j)})\}$
-                \State 计算带批次RMSD惩罚的奖励目标 $L_{\mathrm{old}}(\theta)-\eta\cdot\text{RMSD}$
-                \State $g_\theta \gets \nabla_\theta\left(\mathbb{E}[r_\theta(x,y_E)]-\mathbb{E}[r_\theta(x,y_{\mathrm{old}})]-\eta\cdot\text{RMSD}\right)$
+                \State 取奖励约束批次 $\mathcal{B}_r$，计算 $\mathcal{R}_{\mathrm{prox}}=\mathrm{RMSD}(\theta;\theta_{\mathrm{old}},\mathcal{B}_r)$
+                \State 计算带批次RMSD惩罚的奖励目标 $L_{\mathrm{old}}(\theta)-\eta\cdot\mathcal{R}_{\mathrm{prox}}$
+                \State $g_\theta \gets \nabla_\theta\left(\mathbb{E}[r_\theta(x,y_E)]-\mathbb{E}[r_\theta(x,y_{\mathrm{old}})]-\eta\cdot\mathcal{R}_{\mathrm{prox}}\right)$
                 \State 执行梯度上升：$\theta \gets \theta + \lambda^r g_\theta$
             \EndFor
             \State \textbf{// 自适应约束系数调节}
-            \State 在本轮奖励优化使用的样本批次上计算 $\text{RMSD}_k$（见式~\eqref{eq:rmsd}）
-            \If{$\text{RMSD}_k > \delta\tau$}
+            \State 在本轮奖励优化使用的样本批次上计算 $\mathrm{RMSD}_k$（见式~\eqref{eq:rmsd}）
+            \If{$\mathrm{RMSD}_k > \delta\tau$}
                 \State $\eta \gets \alpha' \cdot \eta$
-            \ElsIf{$\text{RMSD}_k < \gamma\tau$}
+            \ElsIf{$\mathrm{RMSD}_k < \gamma\tau$}
                 \State $\eta \gets \alpha \cdot \eta$
             \EndIf
         \EndFor
@@ -568,11 +591,11 @@ C\epsilon
 
 算法~\ref{alg:piro}的训练流程由三个模块交替执行构成。
 
-\textbf{内层策略优化}：固定当前奖励参数 $\theta$，以 $T_\pi$ 步梯度上升更新策略参数 $\phi$，让策略趋向当前奖励函数下的近似最优解。优化目标为期望奖励与KL惩罚的加权和，KL惩罚在词元级别计算，即 $\log(\pi_\phi(y|x)/\pi_{\mathrm{ref}}(y|x)) = \sum_t \log(\pi_\phi(a_t|s_t)/\pi_{\mathrm{ref}}(a_t|s_t))$。
+\textbf{内层策略优化}：固定当前奖励参数 $\theta$，以 $T_\pi$ 步更新策略参数 $\phi$，让策略趋向当前奖励函数下的近似最优解。优化目标为期望奖励与KL惩罚的加权和，KL惩罚在词元级别计算，即 $\log(\pi_\phi(y|x)/\pi_{\mathrm{ref}}(y|x)) = \sum_t \log(\pi_\phi(a_t|s_t)/\pi_{\mathrm{ref}}(a_t|s_t))$。实际实现中，内层策略优化可由PPO、GRPO或其他KL约束策略优化器近似完成；算法中用 $\mathcal{J}_\pi$ 表示其抽象更新目标。
 
-\textbf{外层奖励优化}：固定当前策略为 $\pi_{\mathrm{old}}$，以 $T_r$ 步梯度上升更新奖励参数 $\theta$，最大化带批次RMSD惩罚的替代目标 $L_{\mathrm{old}}(\theta)-\eta\cdot\text{RMSD}$。本步固定 $\pi_{\mathrm{old}}$，KL项对 $\theta$ 不产生梯度，实现时用专家样本奖励减去旧策略样本奖励，并加入RMSD惩罚项来估计奖励更新方向。
+\textbf{外层奖励优化}：固定当前策略为 $\pi_{\mathrm{old}}$，以 $T_r$ 步梯度上升更新奖励参数 $\theta$，最大化带批次RMSD惩罚的替代目标 $L_{\mathrm{old}}(\theta)-\eta\cdot\mathrm{RMSD}(\theta;\theta_{\mathrm{old}},\mathcal{B})$。本步固定 $\pi_{\mathrm{old}}$，KL项对 $\theta$ 不产生梯度，实现时用专家样本奖励减去旧策略样本奖励，并加入RMSD惩罚项来估计奖励更新方向。这里的 $\mathrm{RMSD}(\theta;\theta_{\mathrm{old}},\mathcal{B})$ 随当前奖励参数 $\theta$ 变化，因此参与奖励更新的反向传播。
 
-\textbf{自适应约束系数调节}：每轮奖励优化完成后，计算本轮奖励函数相对于上轮的RMSD，依据式~\eqref{eq:adaptive_eta}调节下一轮的约束系数。当RMSD超过 $\delta\tau$ 时增大 $\eta$，当RMSD低于 $\gamma\tau$ 时减小 $\eta$。
+\textbf{自适应约束系数调节}：每轮奖励优化完成后，计算本轮奖励函数相对于上轮的轮次级统计量 $\mathrm{RMSD}_k$，依据式~\eqref{eq:adaptive_eta}调节下一轮的约束系数。当RMSD超过 $\delta\tau$ 时增大 $\eta$，当RMSD低于 $\gamma\tau$ 时减小 $\eta$。因此，训练中的RMSD惩罚项用于当前轮反向传播，轮次结束后的 $\mathrm{RMSD}_k$ 用于调节下一轮约束强度。
 
 \section{本章小结}
 
