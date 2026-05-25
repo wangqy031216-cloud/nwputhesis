@@ -522,10 +522,10 @@ C\epsilon
 
 \subsection{算法总体设计}
 
-基于上述理论框架，本文提出近端奖励反演优化方法（Proximal Inverse Reward Optimization, PIRO）。其中，“奖励反演”表示从专家响应中学习可用于策略优化的奖励函数，“近端”表示每轮奖励更新受到相邻轮次奖励变化幅度的约束。PIRO采用奖励与策略交替优化的迭代训练范式，总体流程如算法~\ref{alg:piro}所示。
+基于上述理论框架，本文提出近端逆奖励优化方法（Proximal Inverse Reward Optimization, PIRO）。其中，“奖励反演”表示从专家响应中学习可用于策略优化的奖励函数，“近端”表示每轮奖励更新受到相邻轮次奖励变化幅度的约束。PIRO采用奖励与策略交替优化的迭代训练范式，总体流程如算法~\ref{alg:piro}所示。
 
 \begin{algorithm}[H]
-    \caption{近端奖励反演优化算法（PIRO）}
+    \caption{近端逆奖励优化算法（PIRO）}
     \label{alg:piro}
     \small
     \begin{algorithmic}[1]
